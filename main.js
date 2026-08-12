@@ -204,6 +204,7 @@ function setupIPC() {
     // ---- Ordres de Service ----
     ipcMain.handle('os:getByLot', (event, lotId) => db.getOSByLot(lotId));
     ipcMain.handle('os:getByProjet', (event, projetId) => db.getOSByProjet(projetId));
+    ipcMain.handle('os:getDependentLots', (event, lotId) => db.getDependentLots(lotId));
     ipcMain.handle('os:create', (event, data) => db.createOS(data));
 
     // ---- Essais Labo ----
@@ -560,6 +561,9 @@ function setupIPC() {
     ipcMain.handle('attachements:getByProjet', (event, projetId) => db.getAttachementsByProjet(projetId));
     ipcMain.handle('attachements:create', (event, data) => db.createAttachement(data));
     ipcMain.handle('attachements:updateStatut', (event, id, statut) => db.updateAttachementStatut(id, statut));
+    ipcMain.handle('attachements:validate', (event, id, acteur) => db.validateAttachement(id, acteur));
+    ipcMain.handle('attachements:requestRectification', (event, id, motif) => db.requestAttachementRectification(id, motif));
+    ipcMain.handle('attachements:resubmit', (event, id) => db.resubmitAttachement(id));
     ipcMain.handle('attachements:delete', (event, id) => db.deleteAttachement(id));
     ipcMain.handle('decomptes:getByProjet', (event, projetId) => db.getDecomptesByProjet(projetId));
     ipcMain.handle('decomptes:get', (event, id) => db.getDecompte(id));
@@ -567,6 +571,8 @@ function setupIPC() {
     ipcMain.handle('decomptes:create', (event, data) => db.createDecompte(data));
     ipcMain.handle('decomptes:actStep', (event, stepId, statut, commentaire, acteur) => db.actOnDecompteStep(stepId, statut, commentaire, acteur));
     ipcMain.handle('decomptes:updateMandat', (event, id, numMandat) => db.updateDecompteMandat(id, numMandat));
+    ipcMain.handle('decomptes:updateTgr', (event, id, numTgr) => db.updateDecompteTgr(id, numTgr));
+    ipcMain.handle('decomptes:getEvents', (event, decompteId) => db.getDecompteEvents(decompteId));
     ipcMain.handle('decomptes:delete', (event, id) => db.deleteDecompte(id));
     ipcMain.handle('decomptes:getStats', (event, projetId) => db.getPaiementStats(projetId));
 

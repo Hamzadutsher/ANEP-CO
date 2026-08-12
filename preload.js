@@ -102,6 +102,7 @@ contextBridge.exposeInMainWorld('api', {
     os: {
         getByLot: (lotId) => ipcRenderer.invoke('os:getByLot', lotId),
         getByProjet: (projetId) => ipcRenderer.invoke('os:getByProjet', projetId),
+        getDependentLots: (lotId) => ipcRenderer.invoke('os:getDependentLots', lotId),
         create: (data) => ipcRenderer.invoke('os:create', data),
         update: (id, data) => ipcRenderer.invoke('os:update', id, data),
         delete: (id) => ipcRenderer.invoke('os:delete', id)
@@ -174,6 +175,9 @@ contextBridge.exposeInMainWorld('api', {
         getByProjet: (projetId) => ipcRenderer.invoke('attachements:getByProjet', projetId),
         create: (data) => ipcRenderer.invoke('attachements:create', data),
         updateStatut: (id, statut) => ipcRenderer.invoke('attachements:updateStatut', id, statut),
+        validate: (id, acteur) => ipcRenderer.invoke('attachements:validate', id, acteur),
+        requestRectification: (id, motif) => ipcRenderer.invoke('attachements:requestRectification', id, motif),
+        resubmit: (id) => ipcRenderer.invoke('attachements:resubmit', id),
         delete: (id) => ipcRenderer.invoke('attachements:delete', id)
     },
     decomptes: {
@@ -183,6 +187,8 @@ contextBridge.exposeInMainWorld('api', {
         create: (data) => ipcRenderer.invoke('decomptes:create', data),
         actStep: (stepId, statut, commentaire, acteur) => ipcRenderer.invoke('decomptes:actStep', stepId, statut, commentaire, acteur),
         updateMandat: (id, numMandat) => ipcRenderer.invoke('decomptes:updateMandat', id, numMandat),
+        updateTgr: (id, numTgr) => ipcRenderer.invoke('decomptes:updateTgr', id, numTgr),
+        getEvents: (decompteId) => ipcRenderer.invoke('decomptes:getEvents', decompteId),
         delete: (id) => ipcRenderer.invoke('decomptes:delete', id),
         getStats: (projetId) => ipcRenderer.invoke('decomptes:getStats', projetId)
     },

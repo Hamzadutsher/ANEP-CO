@@ -114,6 +114,7 @@
         },
         os: {
             getByLot: id => rpc('os:getByLot', id), getByProjet: id => rpc('os:getByProjet', id),
+            getDependentLots: id => rpc('os:getDependentLots', id),
             create: d => rpc('os:create', d), update: (id, d) => rpc('os:update', id, d), delete: id => rpc('os:delete', id)
         },
         essais: {
@@ -141,12 +142,17 @@
         },
         attachements: {
             getByProjet: id => rpc('attachements:getByProjet', id), create: d => rpc('attachements:create', d),
-            updateStatut: (id, s) => rpc('attachements:updateStatut', id, s), delete: id => rpc('attachements:delete', id)
+            updateStatut: (id, s) => rpc('attachements:updateStatut', id, s),
+            validate: (id, ac) => rpc('attachements:validate', id, ac),
+            requestRectification: (id, m) => rpc('attachements:requestRectification', id, m),
+            resubmit: id => rpc('attachements:resubmit', id),
+            delete: id => rpc('attachements:delete', id)
         },
         decomptes: {
             getByProjet: id => rpc('decomptes:getByProjet', id), get: id => rpc('decomptes:get', id),
             getCircuit: id => rpc('decomptes:getCircuit', id), create: d => rpc('decomptes:create', d),
             actStep: (s, st, c, ac) => rpc('decomptes:actStep', s, st, c, ac), updateMandat: (id, n) => rpc('decomptes:updateMandat', id, n),
+            updateTgr: (id, n) => rpc('decomptes:updateTgr', id, n), getEvents: id => rpc('decomptes:getEvents', id),
             delete: id => rpc('decomptes:delete', id), getStats: id => rpc('decomptes:getStats', id)
         },
         cr: {

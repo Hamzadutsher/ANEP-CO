@@ -85,6 +85,14 @@ class AppDatabase {
     _migrate() {
         this._ensureColumn('documents', 'categorie', 'TEXT');
         this._ensureColumn('intervenants', 'avatar', 'TEXT');
+        // Circuit de paiement enrichi (ordonnancement, visa TGR) + traçabilité
+        this._ensureColumn('decomptes', 'phase_paiement', 'TEXT');
+        this._ensureColumn('decomptes', 'date_ordonnancement', 'DATE');
+        this._ensureColumn('decomptes', 'date_visa_tgr', 'DATE');
+        this._ensureColumn('decomptes', 'num_tgr', 'TEXT');
+        this._ensureColumn('attachements', 'motif_rectification', 'TEXT');
+        // Liaison forte entre OS de différents lots (maîtrise du chevauchement)
+        this._ensureColumn('ordres_service', 'os_lie_id', 'INTEGER');
     }
 
     // Auto-save after write operations
@@ -575,15 +583,29 @@ class AppDatabase {
     }
 
     getOSByProjet(projetId) {
-        return this.all(`SELECT os.*, l.code_lot, l.designation as lot_designation
+        return this.all(`SELECT os.*, l.code_lot, l.designation as lot_designation,
+            osl.numero_os as os_lie_numero, ll.code_lot as os_lie_lot,
+            (SELECT COUNT(*) FROM documents dd WHERE dd.entite_type = 'os' AND dd.entite_id = os.id) as nb_pieces
             FROM ordres_service os JOIN lots l ON os.lot_id = l.id
+            LEFT JOIN ordres_service osl ON os.os_lie_id = osl.id
+            LEFT JOIN lots ll ON osl.lot_id = ll.id
             WHERE l.projet_id = ? ORDER BY os.date_notification DESC`, [projetId]);
     }
 
+    // Lots dépendants (cibles) d'un lot source, via les interfaces déclarées
+    getDependentLots(lotId) {
+        return this.all(`SELECT DISTINCT lc.id, lc.code_lot, lc.designation, li.type_interface
+            FROM lot_interfaces li JOIN lots lc ON li.lot_cible_id = lc.id
+            WHERE li.lot_source_id = ? ORDER BY lc.code_lot`, [lotId]);
+    }
+
     createOS(data) {
-        return this.run(`INSERT INTO ordres_service (lot_id, numero_os, type_os, objet, date_notification, date_effet, delai_jours, motif, observations)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [data.lot_id, data.numero_os, data.type_os, data.objet, data.date_notification, data.date_effet, data.delai_jours || 0, data.motif, data.observations]);
+        const res = this.run(`INSERT INTO ordres_service (lot_id, numero_os, type_os, objet, date_notification, date_effet, delai_jours, date_fin_effet, motif, observations, os_lie_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [data.lot_id, data.numero_os, data.type_os, data.objet, data.date_notification, data.date_effet, data.delai_jours || 0, data.date_fin_effet || null, data.motif, data.observations, data.os_lie_id || null]);
+        const lot = this.get('SELECT projet_id FROM lots WHERE id = ?', [data.lot_id]);
+        this.logEvent({ acteur_type: 'MOD', action: `OS ${data.type_os} émis`, cible_type: 'os', cible_id: res.lastInsertRowid, projet_id: lot && lot.projet_id, details: `${data.numero_os} — ${data.objet}` });
+        return res;
     }
 
     // ---- Essais Labo ----
@@ -1218,6 +1240,36 @@ class AppDatabase {
         return this.all(`SELECT a.*, l.code_lot FROM attachements a JOIN lots l ON a.lot_id = l.id WHERE a.projet_id = ? ORDER BY a.date_attachement DESC, a.id DESC`, [projetId]);
     }
     updateAttachementStatut(id, statut) { return this.run('UPDATE attachements SET statut = ? WHERE id = ?', [statut, id]); }
+    // Validation d'un attachement par le MOD (avec traçabilité + notification)
+    validateAttachement(id, acteur) {
+        this.run("UPDATE attachements SET statut = 'Validé', motif_rectification = NULL WHERE id = ?", [id]);
+        const a = this.get('SELECT * FROM attachements WHERE id = ?', [id]);
+        if (a) {
+            this.logEvent({ acteur_type: 'MOD', action: 'Attachement validé', cible_type: 'attachement', cible_id: id, projet_id: a.projet_id, details: `${a.numero} — ${acteur || 'MOD'}` });
+            this.createNotification({ destinataire_type: 'Entreprise', projet_id: a.projet_id, titre: 'Attachement validé ✅', message: `${a.numero} validé — vous pouvez établir le décompte.`, type_notif: 'succes' });
+        }
+        return { success: true };
+    }
+    // Renvoi pour rectification (repasse en brouillon, motif transmis à l'entreprise)
+    requestAttachementRectification(id, motif) {
+        this.run("UPDATE attachements SET statut = 'Brouillon', motif_rectification = ? WHERE id = ?", [motif || null, id]);
+        const a = this.get('SELECT * FROM attachements WHERE id = ?', [id]);
+        if (a) {
+            this.logEvent({ acteur_type: 'MOD', action: 'Attachement — rectification demandée', cible_type: 'attachement', cible_id: id, projet_id: a.projet_id, details: motif || '' });
+            this.createNotification({ destinataire_type: 'Entreprise', projet_id: a.projet_id, titre: 'Attachement à rectifier', message: `${a.numero} — ${motif || 'rectification demandée par le MOD'}`, type_notif: 'alerte' });
+        }
+        return { success: true };
+    }
+    // Re-soumission par l'entreprise après rectification
+    resubmitAttachement(id) {
+        this.run("UPDATE attachements SET statut = 'Soumis' WHERE id = ?", [id]);
+        const a = this.get('SELECT * FROM attachements WHERE id = ?', [id]);
+        if (a) {
+            this.logEvent({ acteur_type: 'Entreprise', action: 'Attachement re-soumis après rectification', cible_type: 'attachement', cible_id: id, projet_id: a.projet_id, details: a.numero });
+            this.createNotification({ destinataire_type: 'MOD', projet_id: a.projet_id, titre: 'Attachement re-soumis', message: `${a.numero} corrigé et re-soumis par l'entreprise.`, type_notif: 'info' });
+        }
+        return { success: true };
+    }
     deleteAttachement(id) { return this._deleteRow('attachements', id); }
 
     createDecompte(data) {
@@ -1232,13 +1284,15 @@ class AppDatabase {
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Établi', ?)`,
             [data.projet_id, data.lot_id, data.attachement_id || null, data.numero, data.type || 'Provisoire', data.date_decompte || null, ht, tva, montant_tva, montant_ttc, data.montant_cumule_anterieur || 0, rg, montant_retenue, montant_net, data.observations || null]);
         const did = res.lastInsertRowid;
+        this.run("UPDATE decomptes SET phase_paiement = 'Décompte établi' WHERE id = ?", [did]);
         const steps = [
             { ordre: 1, etape: 'Validation technique', role: 'BET' },
             { ordre: 2, etape: 'Vérification', role: 'Architecte' },
             { ordre: 3, etape: 'Visa contrôle', role: 'BCT' },
-            { ordre: 4, etape: 'Visa MOD', role: 'MOD' },
-            { ordre: 5, etape: 'Mandatement', role: 'MOD' },
-            { ordre: 6, etape: 'Paiement', role: 'MOD' }
+            { ordre: 4, etape: 'Visa MOD (Ordonnateur)', role: 'MOD' },
+            { ordre: 5, etape: 'Ordonnancement / Mandatement', role: 'MOD' },
+            { ordre: 6, etape: 'Visa TGR (Comptable public)', role: 'TGR' },
+            { ordre: 7, etape: 'Mise en paiement', role: 'TGR' }
         ];
         for (const s of steps) this.run(`INSERT INTO decompte_circuit (decompte_id, ordre, etape, responsable_type, statut) VALUES (?, ?, ?, ?, 'En attente')`, [did, s.ordre, s.etape, s.role]);
         this.logEvent({ acteur_type: 'MOD', action: 'Décompte établi', cible_type: 'decompte', cible_id: did, projet_id: data.projet_id, details: `${data.numero} — net à payer ${Math.round(montant_net)} DH` });
@@ -1275,16 +1329,35 @@ class AppDatabase {
         }
         const ok = {}; steps.forEach(s => ok[s.ordre] = s.statut === 'Validé');
         const today = new Date().toISOString().split('T')[0];
-        let statut = 'Établi';
-        if (ok[1]) statut = 'Validé technique';
-        if (ok[1] && ok[2] && ok[3] && ok[4]) statut = 'Visé';
-        if (statut === 'Visé' && ok[5]) { statut = 'Mandaté'; if (!d.date_mandatement) this.run('UPDATE decomptes SET date_mandatement = ? WHERE id = ?', [today, decompteId]); }
-        if (statut === 'Mandaté' && ok[6]) { statut = 'Payé'; if (!d.date_paiement) this.run('UPDATE decomptes SET date_paiement = ? WHERE id = ?', [today, decompteId]); }
-        this.run('UPDATE decomptes SET statut = ? WHERE id = ?', [statut, decompteId]);
+        // statut = résumé (compatibilité) ; phase_paiement = phase détaillée des finances publiques
+        let statut = 'Établi', phase = 'Décompte établi';
+        if (ok[1]) { statut = 'Validé technique'; phase = 'Validé technique (BET)'; }
+        if (ok[1] && ok[2]) phase = 'Vérifié (Architecte)';
+        if (ok[1] && ok[2] && ok[3]) phase = 'Visa contrôle (BCT)';
+        if (ok[1] && ok[2] && ok[3] && ok[4]) { statut = 'Visé'; phase = 'Visé MOD — bon à ordonnancer'; }
+        if (statut === 'Visé' && ok[5]) {
+            statut = 'Mandaté'; phase = 'Ordonnancé / Mandaté';
+            if (!d.date_ordonnancement) this.run('UPDATE decomptes SET date_ordonnancement = ? WHERE id = ?', [today, decompteId]);
+            if (!d.date_mandatement) this.run('UPDATE decomptes SET date_mandatement = ? WHERE id = ?', [today, decompteId]);
+        }
+        if (statut === 'Mandaté' && ok[6]) {
+            phase = 'Visé par la TGR';
+            if (!d.date_visa_tgr) this.run('UPDATE decomptes SET date_visa_tgr = ? WHERE id = ?', [today, decompteId]);
+        }
+        if (statut === 'Mandaté' && ok[6] && ok[7]) {
+            statut = 'Payé'; phase = 'Mis en paiement (payé)';
+            if (!d.date_paiement) this.run('UPDATE decomptes SET date_paiement = ? WHERE id = ?', [today, decompteId]);
+        }
+        this.run('UPDATE decomptes SET statut = ?, phase_paiement = ? WHERE id = ?', [statut, phase, decompteId]);
         if (statut === 'Payé') this.createNotification({ destinataire_type: 'MOD', projet_id: d.projet_id, titre: 'Décompte payé ✅', message: `${d.numero} payé (${Math.round(d.montant_net_a_payer)} DH).`, type_notif: 'succes' });
-        return { status: statut };
+        return { status: statut, phase };
     }
     updateDecompteMandat(id, numMandat) { return this.run('UPDATE decomptes SET num_mandat = ? WHERE id = ?', [numMandat, id]); }
+    updateDecompteTgr(id, numTgr) { return this.run('UPDATE decomptes SET num_tgr = ? WHERE id = ?', [numTgr, id]); }
+    // Traçabilité : journal des évènements d'un décompte (circuit documentaire)
+    getDecompteEvents(decompteId) {
+        return this.all("SELECT * FROM evenements WHERE cible_type = 'decompte' AND cible_id = ? ORDER BY created_at DESC, id DESC LIMIT 60", [decompteId]);
+    }
     deleteDecompte(id) {
         this.run('DELETE FROM decompte_circuit WHERE decompte_id = ?', [id]);
         return this._deleteRow('decomptes', id);

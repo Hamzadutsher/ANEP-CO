@@ -1775,58 +1775,59 @@ async function exportDelais(projetId) {
 async function renderOrdresService(container) {
     updatePageTitle('Ordres de Service');
     const projets = await window.api.projets.getAll();
-    const projetId = projets[0]?.id;
+    const projetId = window._osProjet && projets.some(p => p.id === window._osProjet) ? window._osProjet : projets[0]?.id;
+    window._osProjet = projetId;
     const os = projetId ? await window.api.os.getByProjet(projetId) : [];
-    
+    window._osList = os;
+    // Chaîne des OS liés (arrêt d'un lot → reprise/prolongation des lots dépendants)
+    const chaines = os.filter(o => o.os_lie_numero).length;
+
     container.innerHTML = `
         <div class="page-header animate-fade-in-up">
             <div>
                 <h2>Ordres de Service</h2>
-                <p>Gestion des ordres de service par lot</p>
+                <p>Contrôle total (maître d'ouvrage) — création, modification, suppression, version signée scannée, et <strong>liaison entre lots</strong></p>
             </div>
             <button class="btn btn-primary" onclick="showNewOSModal()">
                 <i data-lucide="file-plus"></i> Nouvel OS
             </button>
         </div>
-        
+
         <div class="filter-bar animate-fade-in-up delay-1">
-            <select class="form-control" id="os-projet-filter" onchange="filterOSByProjet(this.value)">
+            <select class="form-control" id="os-projet-filter" onchange="window._osProjet=parseInt(this.value);navigateTo('ordres-service')">
                 ${projets.map(p => `<option value="${p.id}" ${p.id === projetId ? 'selected' : ''}>${p.code_projet} — ${p.intitule}</option>`).join('')}
             </select>
+            ${chaines ? `<span class="text-xs text-muted"><i data-lucide="link" style="width:13px;height:13px;vertical-align:-2px;"></i> ${chaines} OS lié(s) entre lots</span>` : ''}
         </div>
-        
+
         <div id="os-list" class="table-wrapper animate-fade-in-up delay-2">
             <table class="data-table">
-                <thead><tr><th>N° OS</th><th>Lot</th><th>Type</th><th>Objet</th><th>Date Notification</th><th>Date Effet</th><th>Délai</th><th>Actions</th></tr></thead>
+                <thead><tr><th>N° OS</th><th>Lot</th><th>Type</th><th>Objet</th><th>Notif.</th><th>Effet</th><th>Délai</th><th>Lié à</th><th>Pièces</th><th>Actions</th></tr></thead>
                 <tbody>
                     ${os.map(o => `
                         <tr>
                             <td class="font-medium">${o.numero_os}</td>
-                            <td><span class="badge badge-info">${o.code_lot}</span> ${o.lot_designation}</td>
+                            <td><span class="badge badge-info">${o.code_lot}</span></td>
                             <td>${statusBadge(o.type_os)}</td>
-                            <td>${o.objet}</td>
-                            <td>${formatDate(o.date_notification)}</td>
-                            <td>${formatDate(o.date_effet)}</td>
-                            <td>${o.delai_jours ? o.delai_jours + ' j' : '—'}</td>
+                            <td class="text-sm">${o.objet}</td>
+                            <td class="text-xs text-muted">${formatDate(o.date_notification)}</td>
+                            <td class="text-xs text-muted">${formatDate(o.date_effet)}</td>
+                            <td class="text-xs">${o.delai_jours ? o.delai_jours + ' j' : '—'}</td>
+                            <td class="text-xs">${o.os_lie_numero ? `<span class="badge badge-muted" title="Dépend de ${o.os_lie_numero} (${o.os_lie_lot || ''})"><i data-lucide="link" style="width:11px;height:11px;vertical-align:-1px;"></i> ${o.os_lie_numero}</span>` : '—'}</td>
+                            <td class="text-xs">${o.nb_pieces > 0 ? `<span class="badge badge-success">${o.nb_pieces}</span>` : '—'}</td>
                             <td class="actions">
+                                <button class="btn btn-ghost btn-sm" title="Version signée / pièces jointes" onclick="showEntityDocs('os', ${o.id}, ${projetId}, 'OS ${o.numero_os}')"><i data-lucide="paperclip"></i></button>
+                                <button class="btn btn-ghost btn-sm" title="Propager aux lots dépendants" onclick="propagateOS(${o.id})"><i data-lucide="git-branch"></i></button>
                                 <button class="btn btn-ghost btn-sm" title="Modifier" onclick="editOS(${o.id})"><i data-lucide="pencil"></i></button>
                                 <button class="btn btn-ghost btn-sm" title="Supprimer" onclick="deleteOS(${o.id})"><i data-lucide="trash-2"></i></button>
                             </td>
                         </tr>
-                    `).join('') || '<tr><td colspan="8" class="text-center text-muted p-lg">Aucun OS</td></tr>'}
+                    `).join('') || '<tr><td colspan="10" class="text-center text-muted p-lg">Aucun OS</td></tr>'}
                 </tbody>
             </table>
         </div>
     `;
-}
-
-async function filterOSByProjet(projetId) {
-    const os = await window.api.os.getByProjet(projetId);
-    const list = document.getElementById('os-list');
-    list.innerHTML = `<table class="data-table">
-        <thead><tr><th>N° OS</th><th>Lot</th><th>Type</th><th>Objet</th><th>Date Notification</th><th>Date Effet</th><th>Délai</th></tr></thead>
-        <tbody>${os.map(o => `<tr><td class="font-medium">${o.numero_os}</td><td><span class="badge badge-info">${o.code_lot}</span></td><td>${statusBadge(o.type_os)}</td><td>${o.objet}</td><td>${formatDate(o.date_notification)}</td><td>${formatDate(o.date_effet)}</td><td>${o.delai_jours ? o.delai_jours + ' j' : '—'}</td></tr>`).join('') || '<tr><td colspan="7" class="text-center text-muted">Aucun OS</td></tr>'}</tbody>
-    </table>`;
+    if (window.lucide) lucide.createIcons();
 }
 
 function showNewOSModal(os = null) {
@@ -1847,7 +1848,12 @@ function showNewOSModal(os = null) {
                 <div class="form-group"><label class="form-label required">Date d'Effet</label><input type="date" class="form-control" name="date_effet" value="${v('date_effet')}" required></div>
                 <div class="form-group"><label class="form-label">Délai (jours)</label><input type="number" class="form-control" name="delai_jours" value="${v('delai_jours')}"></div>
             </div>
+            <div class="form-row">
+                <div class="form-group"><label class="form-label">Date fin d'effet</label><input type="date" class="form-control" name="date_fin_effet" value="${v('date_fin_effet')}"></div>
+                <div class="form-group"><label class="form-label">OS lié (dépendance d'un autre lot)</label><select class="form-control" name="os_lie_id" id="os-lie-select"><option value="">— Aucun —</option></select></div>
+            </div>
             <div class="form-group"><label class="form-label">Motif</label><textarea class="form-control" name="motif" rows="2">${v('motif')}</textarea></div>
+            <div class="form-group"><label class="form-label">Observations</label><textarea class="form-control" name="observations" rows="2">${v('observations')}</textarea></div>
         </form>
     `;
     openModal(os && os.id ? "Modifier l'ordre de service" : 'Nouvel Ordre de Service', body, `
@@ -1855,6 +1861,17 @@ function showNewOSModal(os = null) {
         <button class="btn btn-primary" onclick="submitOS(${os && os.id ? os.id : 'null'})">Enregistrer</button>
     `, 'lg');
     loadOSLots(os ? os.lot_id : null);
+    loadOSLieOptions(os ? os.os_lie_id : null, os ? os.id : null);
+}
+
+// Peuple la liste des OS liables (OS des autres lots du même projet)
+async function loadOSLieOptions(selectedId = null, currentOsId = null) {
+    const sel = document.getElementById('os-lie-select');
+    if (!sel) return;
+    const projetId = window._osProjet || (await window.api.projets.getAll())[0]?.id;
+    const list = projetId ? await window.api.os.getByProjet(projetId) : [];
+    sel.innerHTML = '<option value="">— Aucun —</option>' + list.filter(o => o.id !== currentOsId).map(o =>
+        `<option value="${o.id}" ${selectedId === o.id ? 'selected' : ''}>[${o.code_lot}] ${o.numero_os} — ${o.type_os}</option>`).join('');
 }
 
 async function loadOSLots(selectedLotId = null) {
@@ -1870,10 +1887,67 @@ async function loadOSLots(selectedLotId = null) {
 async function submitOS(id) {
     const data = Object.fromEntries(new FormData(document.getElementById('form-new-os')));
     if (!data.numero_os || !data.objet) { showToast('Erreur', 'Champs requis manquants.', 'danger'); return; }
+    // Nettoyage : os_lie_id / date_fin_effet vides → null
+    data.os_lie_id = data.os_lie_id ? parseInt(data.os_lie_id) : null;
+    if (!data.date_fin_effet) data.date_fin_effet = null;
     try {
         if (id) { await window.api.os.update(id, data); showToast('Succès', 'Ordre de service modifié.', 'success'); }
-        else { await window.api.os.create(data); showToast('Succès', 'Ordre de service créé.', 'success'); }
+        else { await window.api.os.create(data); showToast('Succès', 'Ordre de service créé. Joignez la version signée scannée (bouton trombone).', 'success'); }
         closeModal();
+        navigateTo('ordres-service');
+    } catch (err) { showToast('Erreur', err.message, 'danger'); }
+}
+
+// Propagation d'un OS aux lots dépendants (maîtrise du chevauchement des délais entre lots)
+async function propagateOS(osId) {
+    const os = (window._osList || []).find(o => o.id === osId) || null;
+    if (!os) { showToast('Erreur', 'OS introuvable.', 'danger'); return; }
+    const deps = await window.api.os.getDependentLots(os.lot_id);
+    if (!deps.length) {
+        showToast('Aucun lot dépendant', `Le lot ${os.code_lot} n'a pas d'interface déclarée. Déclarez les dépendances dans « Interfaces entre lots ».`, 'warning');
+        return;
+    }
+    const body = `
+        <div class="mb-md text-sm">Répercuter l'OS <strong>${os.numero_os}</strong> (${os.type_os}) du lot <span class="badge badge-info">${os.code_lot}</span> sur les lots dépendants.
+        Un OS <strong>lié</strong> sera créé pour chaque lot coché, avec les mêmes dates — pour garder les délais synchronisés.</div>
+        <div class="card-flat" style="border:1px solid var(--border-color);border-radius:8px;padding:6px 12px;">
+            ${deps.map(l => `<label class="d-flex align-center gap-sm" style="padding:7px 0;border-bottom:1px solid var(--border-color);cursor:pointer;">
+                <input type="checkbox" class="os-prop-lot" value="${l.id}" checked>
+                <span><span class="badge badge-info">${l.code_lot}</span> ${l.designation} <span class="text-xs text-muted">· interface : ${l.type_interface}</span></span>
+            </label>`).join('')}
+        </div>`;
+    openModal('Propager l\'OS aux lots dépendants', body, `
+        <button class="btn btn-ghost" onclick="closeModal()">Annuler</button>
+        <button class="btn btn-primary" onclick="submitPropagateOS(${osId})"><i data-lucide="git-branch"></i> Créer les OS liés</button>`, 'lg');
+    if (window.lucide) lucide.createIcons();
+}
+
+async function submitPropagateOS(osId) {
+    const os = (window._osList || []).find(o => o.id === osId);
+    if (!os) return;
+    const lotIds = Array.from(document.querySelectorAll('.os-prop-lot:checked')).map(c => parseInt(c.value));
+    if (!lotIds.length) { showToast('Rien à faire', 'Sélectionnez au moins un lot.', 'warning'); return; }
+    if (!confirm(`Créer ${lotIds.length} OS lié(s) « ${os.type_os} » sur les lots dépendants ?`)) return;
+    try {
+        for (const lotId of lotIds) {
+            const lot = (await window.api.lots.getByProjet(window._osProjet)).find(l => l.id === lotId);
+            const suffix = lot ? '-' + lot.code_lot : '-L' + lotId;
+            await window.api.os.create({
+                lot_id: lotId,
+                numero_os: os.numero_os + suffix,
+                type_os: os.type_os,
+                objet: '[Lié à ' + os.numero_os + '] ' + os.objet,
+                date_notification: os.date_notification,
+                date_effet: os.date_effet,
+                delai_jours: os.delai_jours || 0,
+                date_fin_effet: os.date_fin_effet || null,
+                motif: os.motif || ('Répercussion de l\'OS ' + os.numero_os + ' du lot ' + os.code_lot),
+                observations: os.observations || null,
+                os_lie_id: osId
+            });
+        }
+        closeModal();
+        showToast('OS propagés', `${lotIds.length} OS lié(s) créé(s) — délais synchronisés entre lots.`, 'success');
         navigateTo('ordres-service');
     } catch (err) { showToast('Erreur', err.message, 'danger'); }
 }
@@ -2957,7 +3031,7 @@ async function renderPaiements(container) {
                 ${decomptes.length > 0 ? `
                 <div class="table-wrapper">
                     <table class="data-table">
-                        <thead><tr><th>N°</th><th>Lot</th><th>Type</th><th>Montant HT</th><th>TTC</th><th>Retenue</th><th>Net à payer</th><th>Circuit</th><th>Statut</th><th>Actions</th></tr></thead>
+                        <thead><tr><th>N°</th><th>Lot</th><th>Type</th><th>Montant HT</th><th>Net à payer</th><th>Circuit</th><th>Statut / Phase</th><th>Actions</th></tr></thead>
                         <tbody>
                             ${decomptes.map(d => `
                                 <tr>
@@ -2965,13 +3039,12 @@ async function renderPaiements(container) {
                                     <td><span class="badge badge-info">${d.code_lot}</span></td>
                                     <td class="text-xs">${d.type}</td>
                                     <td class="text-xs">${formatCurrency(d.montant_ht)}</td>
-                                    <td class="text-xs">${formatCurrency(d.montant_ttc)}</td>
-                                    <td class="text-xs text-muted">${formatCurrency(d.montant_retenue)}</td>
                                     <td class="font-bold text-sm">${formatCurrency(d.montant_net_a_payer)}</td>
                                     <td class="text-xs">${d.etapes_validees}/${d.etapes_total}</td>
-                                    <td>${decompteStatutBadge(d.statut)}</td>
+                                    <td>${decompteStatutBadge(d.statut)}${d.phase_paiement ? `<div class="text-xs text-muted mt-sm">${d.phase_paiement}</div>` : ''}</td>
                                     <td class="actions">
-                                        <button class="btn btn-primary btn-sm" title="Circuit" onclick="showDecompteCircuit(${d.id})"><i data-lucide="git-merge"></i></button>
+                                        <button class="btn btn-primary btn-sm" title="Circuit & phases de paiement" onclick="showDecompteCircuit(${d.id})"><i data-lucide="git-merge"></i></button>
+                                        <button class="btn btn-ghost btn-sm" title="Pièces jointes (décompte signé, PJ…)" onclick="showEntityDocs('decompte', ${d.id}, ${projetId}, 'Décompte ${d.numero}')"><i data-lucide="paperclip"></i></button>
                                         <button class="btn btn-ghost btn-sm" title="Supprimer" onclick="deleteDecompte(${d.id})"><i data-lucide="trash-2"></i></button>
                                     </td>
                                 </tr>
@@ -2997,9 +3070,12 @@ async function renderPaiements(container) {
                                     <td class="text-xs">${a.periode || '—'}</td>
                                     <td class="text-xs text-muted">${formatDate(a.date_attachement)}</td>
                                     <td class="font-medium">${formatCurrency(a.montant_travaux)}</td>
-                                    <td>${statusBadge(a.statut)}</td>
+                                    <td>${statusBadge(a.statut)}${a.motif_rectification && a.statut === 'Brouillon' ? `<div class="text-xs text-danger mt-sm" title="Motif de rectification">↩ ${a.motif_rectification}</div>` : ''}</td>
                                     <td class="actions">
+                                        <button class="btn btn-ghost btn-sm" title="Pièces jointes (métré, plans, version signée…)" onclick="showEntityDocs('attachement', ${a.id}, ${projetId}, 'Attachement ${a.numero}')"><i data-lucide="paperclip"></i></button>
                                         ${isM && a.statut !== 'Validé' ? `<button class="btn btn-ghost btn-sm" title="Valider" onclick="validateAttachement(${a.id})"><i data-lucide="check"></i></button>` : ''}
+                                        ${isM && a.statut === 'Soumis' ? `<button class="btn btn-ghost btn-sm" title="Demander rectification" onclick="requestAttachementRectif(${a.id})"><i data-lucide="undo-2"></i></button>` : ''}
+                                        ${!isM && a.statut === 'Brouillon' ? `<button class="btn btn-secondary btn-sm" title="Re-soumettre après rectification" onclick="resubmitAttachement(${a.id})"><i data-lucide="send"></i> Re-soumettre</button>` : ''}
                                         ${isM ? `<button class="btn btn-ghost btn-sm" title="Créer décompte" onclick="showNewDecompteModal(${projetId}, ${a.id})"><i data-lucide="file-plus"></i></button>` : ''}
                                         <button class="btn btn-ghost btn-sm" title="Supprimer" onclick="deleteAttachement(${a.id})"><i data-lucide="trash-2"></i></button>
                                     </td>
@@ -3040,13 +3116,36 @@ async function showNewAttachementModal(projetId) {
 async function submitAttachement(projetId) {
     const data = Object.fromEntries(new FormData(document.getElementById('form-attachement')));
     if (!data.numero || !data.montant_travaux) { showToast('Erreur', 'N° et montant requis.', 'danger'); return; }
-    try { await window.api.attachements.create(data); closeModal(); showToast('Succès', 'Attachement enregistré.', 'success'); navigateTo('paiements'); }
-    catch (err) { showToast('Erreur', err.message, 'danger'); }
+    // Confirmation avant dépôt (entrée dans le circuit documentaire)
+    if (!confirm(`Confirmer le dépôt de l'attachement « ${data.numero} » (${formatCurrency(data.montant_travaux)}) ?\n\nIl entrera dans le circuit documentaire et sera transmis au maître d'ouvrage pour validation.`)) return;
+    try {
+        const res = await window.api.attachements.create(data);
+        closeModal(); showToast('Attachement déposé', 'Enregistré et transmis au MOD. Ajoutez les pièces jointes (bouton trombone).', 'success');
+        navigateTo('paiements');
+    } catch (err) { showToast('Erreur', err.message, 'danger'); }
 }
 
 async function validateAttachement(id) {
-    await window.api.attachements.updateStatut(id, 'Validé');
-    showToast('Validé', 'Attachement validé.', 'success');
+    if (!confirm('Valider cet attachement ?\n\nLe métré constaté est réputé conforme ; l’entreprise pourra établir le décompte correspondant.')) return;
+    const acteur = currentUser.nom || 'MOD';
+    await window.api.attachements.validate(id, acteur);
+    showToast('Attachement validé ✅', 'L’entreprise est notifiée.', 'success');
+    navigateTo('paiements');
+}
+
+async function requestAttachementRectif(id) {
+    const motif = prompt('Motif de la demande de rectification (transmis à l’entreprise) :');
+    if (motif === null) return;
+    if (!confirm('Renvoyer cet attachement pour rectification ?\n\nIl repasse en brouillon ; l’entreprise devra le corriger puis le re-soumettre.')) return;
+    await window.api.attachements.requestRectification(id, motif);
+    showToast('Rectification demandée', 'L’entreprise est notifiée du motif.', 'warning');
+    navigateTo('paiements');
+}
+
+async function resubmitAttachement(id) {
+    if (!confirm('Re-soumettre cet attachement corrigé au maître d’ouvrage ?')) return;
+    await window.api.attachements.resubmit(id);
+    showToast('Re-soumis', 'Attachement corrigé transmis au MOD.', 'success');
     navigateTo('paiements');
 }
 
@@ -3055,6 +3154,55 @@ async function deleteAttachement(id) {
     await window.api.attachements.delete(id);
     showToast('Supprimé', 'Attachement supprimé.', 'success');
     navigateTo('paiements');
+}
+
+// ---- Pièces jointes génériques (réutilisable : attachement, décompte, OS…) ----
+function _docFileMeta(dc) {
+    const ext = (dc.extension || '').toLowerCase();
+    const ic = ['xls', 'xlsx', 'csv'].includes(ext) ? 'file-spreadsheet' : (ext === 'pdf' ? 'file-text' : (['doc', 'docx'].includes(ext) ? 'file-type' : (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'].includes(ext) ? 'image' : 'file')));
+    const ko = dc.taille ? (dc.taille < 1024 * 1024 ? Math.max(1, Math.round(dc.taille / 1024)) + ' Ko' : (dc.taille / 1048576).toFixed(1) + ' Mo') : '';
+    return { ic, ko };
+}
+async function showEntityDocs(entiteType, entiteId, projetId, label) {
+    const docs = await window.api.documents.getByEntity(entiteType, entiteId);
+    const lbl = (label || '').replace(/'/g, '’');
+    const rows = docs.length ? docs.map(dc => {
+        const m = _docFileMeta(dc);
+        return `<div class="d-flex justify-between align-center" style="padding:8px 4px;border-bottom:1px solid var(--border-color);">
+            <div class="d-flex align-center gap-sm" style="min-width:0;">
+                <i data-lucide="${m.ic}" style="width:18px;height:18px;flex:none;"></i>
+                <div style="min-width:0;"><div class="text-sm font-medium" style="overflow:hidden;text-overflow:ellipsis;">${dc.nom}</div>
+                <div class="text-xs text-muted">${(dc.extension || '').toUpperCase()}${m.ko ? ' · ' + m.ko : ''} · ${formatDateTime(dc.created_at)}${dc.uploaded_by ? ' · ' + dc.uploaded_by : ''}</div></div>
+            </div>
+            <div class="btn-group" style="flex:none;">
+                <button class="btn btn-ghost btn-sm" title="Ouvrir" onclick="window.api.documents.open(${dc.id})"><i data-lucide="eye"></i></button>
+                <button class="btn btn-ghost btn-sm" title="Télécharger" onclick="window.api.documents.saveAs(${dc.id})"><i data-lucide="download"></i></button>
+                <button class="btn btn-ghost btn-sm" title="Supprimer" onclick="deleteEntityDoc(${dc.id}, '${entiteType}', ${entiteId}, ${projetId}, '${lbl}')"><i data-lucide="trash-2"></i></button>
+            </div>
+        </div>`;
+    }).join('') : '<div class="empty-state p-md"><p class="text-muted text-sm">Aucune pièce jointe. Ajoutez le fichier source (Excel, PDF, Word) ou la version signée scannée.</p></div>';
+    const body = `
+        <div class="mb-md text-sm text-muted">Pièces jointes — <strong>${label}</strong>. Formats : Excel, PDF, Word, images (version signée scannée)…</div>
+        <div class="card-flat" style="border:1px solid var(--border-color);border-radius:8px;max-height:340px;overflow:auto;padding:0 8px;">${rows}</div>`;
+    openModal('Pièces jointes — ' + label, body, `
+        <button class="btn btn-ghost" onclick="closeModal()">Fermer</button>
+        <button class="btn btn-primary" onclick="uploadEntityDoc('${entiteType}', ${entiteId}, ${projetId}, '${lbl}')"><i data-lucide="upload"></i> Ajouter un fichier</button>`, 'lg');
+    if (window.lucide) lucide.createIcons();
+}
+async function uploadEntityDoc(entiteType, entiteId, projetId, label) {
+    const acteur = currentUser.role === 'MOD' ? (currentUser.nom || 'MOD') : (currentUser.raison_sociale || currentUser.role);
+    try {
+        const res = await window.api.documents.upload({ entite_type: entiteType, entite_id: entiteId, projet_id: projetId, type_document: 'Autre', categorie: 'Pièce jointe', uploaded_by: acteur, uploaded_by_role: currentUser.role });
+        if (res && res.canceled) return;
+        if (res && res.success) { showToast('Pièce jointe ajoutée', `${res.count || 1} fichier(s) joint(s) et tracé(s).`, 'success'); showEntityDocs(entiteType, entiteId, projetId, label); }
+        else showToast('Erreur', (res && res.error) || 'Upload impossible.', 'danger');
+    } catch (err) { showToast('Erreur', err.message, 'danger'); }
+}
+async function deleteEntityDoc(docId, entiteType, entiteId, projetId, label) {
+    if (!confirm('Supprimer cette pièce jointe ?')) return;
+    await window.api.documents.delete(docId);
+    showToast('Supprimé', 'Pièce jointe supprimée.', 'success');
+    showEntityDocs(entiteType, entiteId, projetId, label);
 }
 
 async function showNewDecompteModal(projetId, attachementId = null) {
@@ -3114,7 +3262,8 @@ function updateDecompteCalc() {
 async function submitDecompte(projetId) {
     const data = Object.fromEntries(new FormData(document.getElementById('form-decompte')));
     if (!data.numero || !data.montant_ht) { showToast('Erreur', 'N° et montant HT requis.', 'danger'); return; }
-    try { await window.api.decomptes.create(data); closeModal(); showToast('Succès', 'Décompte établi — circuit de validation initié.', 'success'); navigateTo('paiements'); }
+    if (!confirm(`Établir le décompte « ${data.numero} » ?\n\nLe circuit de validation → visa → ordonnancement → visa TGR → paiement sera initié. Vous pourrez y joindre le décompte signé (bouton trombone).`)) return;
+    try { await window.api.decomptes.create(data); closeModal(); showToast('Décompte établi', 'Circuit initié (validation → visa → ordonnancement → visa TGR → paiement).', 'success'); navigateTo('paiements'); }
     catch (err) { showToast('Erreur', err.message, 'danger'); }
 }
 
@@ -3128,14 +3277,24 @@ async function deleteDecompte(id) {
 async function showDecompteCircuit(decompteId) {
     const d = await window.api.decomptes.get(decompteId);
     const circuit = await window.api.decomptes.getCircuit(decompteId);
+    let events = [];
+    try { events = await window.api.decomptes.getEvents(decompteId); } catch (e) {}
     const stepStatusClass = (s) => s === 'Validé' ? 'completed' : (['Avec remarques', 'Rejeté'].includes(s) ? 'failed' : '');
+    const dateBadges = [
+        d.date_ordonnancement ? `<span class="badge badge-warning">Ordonnancé le ${formatDate(d.date_ordonnancement)}</span>` : '',
+        d.num_mandat ? `<span class="badge badge-info">Mandat ${d.num_mandat}</span>` : '',
+        d.date_visa_tgr ? `<span class="badge badge-primary">Visa TGR le ${formatDate(d.date_visa_tgr)}</span>` : '',
+        d.num_tgr ? `<span class="badge badge-muted">Réf. TGR ${d.num_tgr}</span>` : '',
+        d.date_paiement ? `<span class="badge badge-success">Payé le ${formatDate(d.date_paiement)}</span>` : ''
+    ].filter(Boolean).join(' ');
     const body = `
         <div class="mb-lg">
             <div class="d-flex justify-between align-center flex-wrap gap-md">
                 <div><h4>${d.numero} — ${d.type}</h4><p class="text-sm text-muted">${d.code_lot} · ${d.lot_designation}</p></div>
                 <div class="text-right"><div class="font-bold text-lg">${formatCurrency(d.montant_net_a_payer)}</div><div class="text-xs text-muted">Net à payer</div></div>
             </div>
-            <div class="mt-sm">${decompteStatutBadge(d.statut)} ${d.num_mandat ? `<span class="badge badge-info">Mandat ${d.num_mandat}</span>` : ''} ${d.date_paiement ? `<span class="badge badge-success">Payé le ${formatDate(d.date_paiement)}</span>` : ''}</div>
+            <div class="mt-sm d-flex align-center flex-wrap gap-sm">${decompteStatutBadge(d.statut)} ${d.phase_paiement ? `<span class="badge badge-info">📍 ${d.phase_paiement}</span>` : ''}</div>
+            ${dateBadges ? `<div class="mt-sm d-flex align-center flex-wrap gap-sm">${dateBadges}</div>` : ''}
         </div>
         <div class="workflow-track">
             ${circuit.map(s => `
@@ -3150,16 +3309,25 @@ async function showDecompteCircuit(decompteId) {
                         ${s.acteur || s.date_action ? `<div class="text-xs text-muted mt-sm">${s.acteur || ''} ${s.date_action ? '· ' + formatDateTime(s.date_action) : ''}</div>` : ''}
                         ${s.statut !== 'Validé' ? `
                             <div class="btn-group mt-sm">
-                                <button class="btn btn-success btn-sm" onclick="actDecompteStep(${s.id}, 'Validé', '${s.etape}', ${decompteId})"><i data-lucide="check"></i> Valider</button>
-                                <button class="btn btn-warning btn-sm" onclick="actDecompteStep(${s.id}, 'Avec remarques', '${s.etape}', ${decompteId})"><i data-lucide="message-square"></i> Remarques</button>
-                                <button class="btn btn-danger btn-sm" onclick="actDecompteStep(${s.id}, 'Rejeté', '${s.etape}', ${decompteId})"><i data-lucide="x"></i> Rejeter</button>
+                                <button class="btn btn-success btn-sm" onclick="actDecompteStep(${s.id}, 'Validé', '${s.etape.replace(/'/g, '’')}', ${decompteId})"><i data-lucide="check"></i> Valider</button>
+                                <button class="btn btn-warning btn-sm" onclick="actDecompteStep(${s.id}, 'Avec remarques', '${s.etape.replace(/'/g, '’')}', ${decompteId})"><i data-lucide="message-square"></i> Remarques</button>
+                                <button class="btn btn-danger btn-sm" onclick="actDecompteStep(${s.id}, 'Rejeté', '${s.etape.replace(/'/g, '’')}', ${decompteId})"><i data-lucide="x"></i> Rejeter</button>
                             </div>` : ''}
                     </div>
                 </div>
             `).join('')}
         </div>
+        ${events.length ? `<div class="mt-lg">
+            <h5 class="mb-sm"><i data-lucide="history" style="width:16px;height:16px;vertical-align:-3px;"></i> Traçabilité (circuit documentaire)</h5>
+            <div class="card-flat" style="border:1px solid var(--border-color);border-radius:8px;max-height:180px;overflow:auto;padding:4px 10px;">
+                ${events.map(ev => `<div class="text-xs" style="padding:5px 0;border-bottom:1px solid var(--border-color);"><span class="text-muted">${formatDateTime(ev.created_at)}</span> · <strong>${ev.acteur_type || ''}</strong> — ${ev.action}${ev.details ? ` <span class="text-muted">(${ev.details})</span>` : ''}</div>`).join('')}
+            </div>
+        </div>` : ''}
     `;
-    openModal('Circuit de paiement — ' + d.numero, body, '<button class="btn btn-ghost" onclick="closeModal()">Fermer</button>', 'lg');
+    openModal('Circuit de paiement — ' + d.numero, body, `
+        <button class="btn btn-ghost" onclick="closeModal()">Fermer</button>
+        <button class="btn btn-secondary" onclick="showEntityDocs('decompte', ${decompteId}, ${d.projet_id}, 'Décompte ${d.numero}')"><i data-lucide="paperclip"></i> Pièces jointes</button>`, 'lg');
+    if (window.lucide) lucide.createIcons();
 }
 
 async function actDecompteStep(stepId, statut, etape, decompteId) {
@@ -3167,13 +3335,21 @@ async function actDecompteStep(stepId, statut, etape, decompteId) {
     if (statut !== 'Validé') {
         commentaire = prompt(`${statut} — motif / remarque :`);
         if (commentaire === null) return;
+    } else {
+        // Confirmation avant de valider une étape du circuit de paiement
+        if (!confirm(`Confirmer la validation de l'étape « ${etape} » ?\n\nCette action fait avancer le décompte dans le circuit et est tracée.`)) return;
     }
-    // N° de mandat lors de la validation du mandatement
-    if (statut === 'Validé' && etape === 'Mandatement') {
-        const num = prompt('N° du mandat de paiement :');
+    // Saisie du n° de mandat à l'ordonnancement / mandatement
+    if (statut === 'Validé' && /ordonnancement|mandatement/i.test(etape)) {
+        const num = prompt('N° du mandat / ordonnancement de paiement :');
         if (num) await window.api.decomptes.updateMandat(decompteId, num);
     }
-    const acteur = currentUser.role === 'MOD' ? 'MOD' : (currentUser.raison_sociale || currentUser.role);
+    // Saisie de la référence du visa TGR
+    if (statut === 'Validé' && /tgr/i.test(etape)) {
+        const ref = prompt('Référence du visa TGR (Trésorerie Générale du Royaume) :');
+        if (ref) await window.api.decomptes.updateTgr(decompteId, ref);
+    }
+    const acteur = currentUser.role === 'MOD' ? (currentUser.nom || 'MOD') : (currentUser.raison_sociale || currentUser.role);
     await window.api.decomptes.actStep(stepId, statut, commentaire, acteur);
     showToast('Circuit mis à jour', `${etape} : ${statut}.`, statut === 'Validé' ? 'success' : 'warning');
     showDecompteCircuit(decompteId);
@@ -3405,6 +3581,7 @@ function renderActeursHub(c) {
 function renderSuiviHub(c) {
     return renderTabHub(c, 'Suivi & contrôle', [
         { pid: 'hub-wf', label: 'Workflow', icon: 'git-branch', render: renderWorkflow },
+        { pid: 'hub-illu', label: 'Illustration', icon: 'image', render: renderIllustrationSuivi },
         { pid: 'hub-res', label: 'Réserves', icon: 'alert-triangle', render: renderReserves },
         { pid: 'hub-ess', label: 'Essais labo', icon: 'flask-conical', render: renderEssais },
         { pid: 'hub-hqse', label: 'HQSE & risques', icon: 'shield-alert', render: renderHqse }
@@ -3591,6 +3768,58 @@ async function loadProjectDocs(projetId) {
 function photoCatBadge(c) {
     const map = { 'Avancement': 'badge-info', 'Conformité': 'badge-success', 'Anomalie': 'badge-danger', 'Réception': 'badge-primary', 'Autre': 'badge-muted' };
     return `<span class="badge ${map[c] || 'badge-muted'}">${c || 'Autre'}</span>`;
+}
+
+// Volet Illustration intégré au Suivi & contrôle (maîtrise temps réel : avancement / conformité / anomalies)
+async function renderIllustrationSuivi(container) {
+    const isM = isMOD();
+    const projets = isM ? await window.api.projets.getAll() : [];
+    const filtreProjet = window._illuProjet != null ? window._illuProjet : (isM ? '' : (currentUser.projet_id || ''));
+    const photos = await window.api.photos.getGallery({ projetId: filtreProjet || undefined, limit: 400 });
+    window._galleryPhotos = photos;
+    const byCat = (c) => photos.filter(p => (p.categorie || 'Autre') === c);
+    const idxOf = (ph) => photos.indexOf(ph);
+    const groups = [
+        { cat: 'Avancement', icon: 'trending-up', cls: 'stat-info' },
+        { cat: 'Conformité', icon: 'check-circle-2', cls: 'stat-success' },
+        { cat: 'Anomalie', icon: 'alert-octagon', cls: 'stat-danger' },
+        { cat: 'Réception', icon: 'clipboard-check', cls: 'stat-primary' }
+    ];
+    const strip = (cat) => {
+        const list = byCat(cat);
+        if (!list.length) return `<div class="empty-state p-md"><p class="text-muted text-sm">Aucune illustration « ${cat} » pour le moment.</p></div>`;
+        return `<div class="photo-grid">${list.slice(0, 12).map(ph => `
+            <div class="photo-card">
+                <div class="photo-thumb" onclick="showPhotoLightbox(${idxOf(ph)})">
+                    ${ph.dataUrl ? `<img src="${ph.dataUrl}" alt="${ph.nom}" loading="lazy">` : '<div class="photo-missing">🖼️</div>'}
+                    <span class="photo-cat">${photoCatBadge(ph.categorie)}</span>
+                </div>
+                <div class="photo-meta"><div class="text-xs font-medium truncate" title="${ph.description || ph.nom}">${ph.description || ph.nom}</div>
+                <div class="text-xs text-muted mt-sm">${ph.code_projet || ''} · ${formatDate(ph.created_at)}</div></div>
+            </div>`).join('')}</div>`;
+    };
+    container.innerHTML = `
+        <div class="page-header animate-fade-in-up">
+            <div><h2>Illustration — maîtrise en temps réel</h2><p>Avancement, conformités et anomalies illustrés par la photo de chantier</p></div>
+            <button class="btn btn-primary" onclick="showUploadDocModal({photo:true, entite_type:'projet', chooseProjet:${isM}, projet_id:${isM ? 'null' : (currentUser.projet_id || 'null')}, onDoneName:'hub-suivi'})"><i data-lucide="camera"></i> Ajouter des photos</button>
+        </div>
+        ${isM ? `<div class="filter-bar animate-fade-in-up delay-1">
+            <select class="form-control" onchange="window._illuProjet=this.value;renderIllustrationSuivi(document.getElementById('hub-illu'))">
+                <option value="">Tous les projets</option>
+                ${projets.map(p => `<option value="${p.id}" ${String(p.id) === String(filtreProjet) ? 'selected' : ''}>${p.code_projet} — ${p.intitule}</option>`).join('')}
+            </select>
+        </div>` : ''}
+        <div class="stats-grid animate-fade-in-up delay-1">
+            ${groups.map(g => `<div class="stat-card ${g.cls}"><div class="stat-icon"><i data-lucide="${g.icon}"></i></div><div class="stat-content"><div class="stat-value">${byCat(g.cat).length}</div><div class="stat-label">${g.cat}</div></div></div>`).join('')}
+        </div>
+        ${byCat('Anomalie').length ? `<div class="card card-flat mb-lg animate-fade-in-up delay-2" style="border-left:3px solid var(--danger);"><div class="card-body"><strong class="text-danger">⚠ ${byCat('Anomalie').length} anomalie(s) illustrée(s)</strong> <span class="text-sm text-muted">— à traiter en priorité.</span></div></div>` : ''}
+        ${groups.map(g => `
+            <div class="card mt-lg animate-fade-in-up delay-2">
+                <div class="card-header"><h4><i data-lucide="${g.icon}" style="width:18px;height:18px;margin-right:8px;vertical-align:-4px;"></i>${g.cat} <span class="text-muted text-sm">(${byCat(g.cat).length})</span></h4></div>
+                <div class="card-body">${strip(g.cat)}</div>
+            </div>`).join('')}
+    `;
+    if (window.lucide) lucide.createIcons({ node: container });
 }
 
 async function renderPhototheque(container) {
