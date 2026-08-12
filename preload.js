@@ -223,7 +223,8 @@ contextBridge.exposeInMainWorld('api', {
         open: (id) => ipcRenderer.invoke('documents:open', id),
         saveAs: (id) => ipcRenderer.invoke('documents:saveAs', id),
         delete: (id) => ipcRenderer.invoke('documents:delete', id),
-        saveDataUrl: (dataUrl, meta) => ipcRenderer.invoke('documents:saveDataUrl', { dataUrl, meta })
+        saveDataUrl: (dataUrl, meta) => ipcRenderer.invoke('documents:saveDataUrl', { dataUrl, meta }),
+        uploadData: (payload) => ipcRenderer.invoke('documents:uploadData', payload)
     },
 
     // Permanence / présence chantier

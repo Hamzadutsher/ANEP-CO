@@ -166,12 +166,35 @@ async function renderPage(pageId, params = {}) {
 // ============================================================
 async function renderDashboard(container) {
     const role = currentUser.role;
-    
+
     if (role === 'MOD') {
         await renderMODDashboard(container);
     } else {
         await renderIntervenantDashboard(container, role);
     }
+}
+
+// ---- Projet actif : filtre global appliqué à tous les modules ----
+const PROJET_FILTER_KEYS = ['_paiementProjet', '_osProjet', '_meteoProjet', '_axeProjet', '_illuProjet', '_photoProjet', '_crProjet', '_interfaceProjet', '_delaisProjet'];
+function setActiveProjet(id) {
+    id = parseInt(id);
+    if (!id) return;
+    window._activeProjet = id;
+    PROJET_FILTER_KEYS.forEach(k => { window[k] = id; });
+    try { sessionStorage.setItem('anep_activeProjet', String(id)); } catch (e) {}
+}
+function restoreActiveProjet() {
+    try { const v = parseInt(sessionStorage.getItem('anep_activeProjet')); if (v) setActiveProjet(v); } catch (e) {}
+}
+function selectProjetFromDashboard(id) {
+    setActiveProjet(id);
+    navigateTo('project-detail', { id: parseInt(id) });
+}
+function clearActiveProjet() {
+    window._activeProjet = null;
+    PROJET_FILTER_KEYS.forEach(k => { window[k] = undefined; });
+    try { sessionStorage.removeItem('anep_activeProjet'); } catch (e) {}
+    navigateTo('dashboard');
 }
 
 async function renderMODDashboard(container) {
@@ -194,8 +217,35 @@ async function renderMODDashboard(container) {
             </div>
         </div>
         
+        <!-- PROJETS : élément prioritaire — cliquez une carte pour piloter et filtrer toute l'application -->
+        <div class="card animate-fade-in-up" style="border:1px solid var(--border-color);">
+            <div class="card-header">
+                <h4><i data-lucide="building-2" style="width:18px;height:18px;margin-right:8px;"></i>Vos projets — cliquez pour piloter & filtrer</h4>
+                ${window._activeProjet ? `<button class="btn btn-ghost btn-sm" onclick="clearActiveProjet()"><i data-lucide="x"></i> Filtre : ${(projets.find(p => p.id === window._activeProjet) || {}).code_projet || ''}</button>` : ''}
+            </div>
+            <div class="card-body">
+                <div class="content-grid-3">
+                    ${projets.map(p => `
+                        <div class="card" style="cursor:pointer;border:2px solid ${p.id === window._activeProjet ? 'var(--primary)' : 'var(--border-color)'};" onclick="selectProjetFromDashboard(${p.id})">
+                            <div class="d-flex justify-between align-center mb-sm">
+                                <span class="badge badge-primary">${p.code_projet}</span>
+                                ${statusBadge(p.statut)}
+                            </div>
+                            <h4 class="mb-sm" style="font-size:var(--text-md);">${p.intitule}</h4>
+                            <div class="d-flex gap-lg text-xs text-muted mb-sm">
+                                <span><i data-lucide="map-pin" style="width:12px;height:12px;"></i> ${p.localisation || '—'}</span>
+                                <span><i data-lucide="layers" style="width:12px;height:12px;"></i> ${p.nb_lots || 0} lots</span>
+                            </div>
+                            ${progressBar(p.taux_avancement)}
+                            <div class="d-flex justify-between mt-sm text-xs text-muted"><span>${formatCurrency(p.montant_marche)}</span><span>${p.taux_avancement}%</span></div>
+                        </div>
+                    `).join('') || '<div class="empty-state p-lg"><p class="text-muted">Aucun projet. Créez votre premier projet.</p></div>'}
+                </div>
+            </div>
+        </div>
+
         <!-- Stats Grid -->
-        <div class="stats-grid">
+        <div class="stats-grid mt-lg">
             <div class="stat-card stat-primary animate-fade-in-up delay-1">
                 <div class="stat-icon icon-primary"><i data-lucide="building-2"></i></div>
                 <div class="stat-content">
@@ -1938,6 +1988,9 @@ function showNewOSModal(os = null) {
             </div>
             <div class="form-group"><label class="form-label">Motif</label><textarea class="form-control" name="motif" rows="2">${v('motif')}</textarea></div>
             <div class="form-group"><label class="form-label">Observations</label><textarea class="form-control" name="observations" rows="2">${v('observations')}</textarea></div>
+            <div class="form-group"><label class="form-label"><i data-lucide="paperclip" style="width:14px;height:14px;vertical-align:-2px;"></i> Fichier joint (version signée scannée, Excel, PDF, Word…)</label>
+                <input type="file" class="form-control" id="os-file" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.jpg,.jpeg,.png,.webp">
+                <span class="text-xs text-muted">Optionnel — joint directement à l'ordre de service (plusieurs fichiers possibles).</span></div>
         </form>
     `;
     openModal(os && os.id ? "Modifier l'ordre de service" : 'Nouvel Ordre de Service', body, `
@@ -1968,15 +2021,38 @@ async function loadOSLots(selectedLotId = null) {
     document.getElementById('os-lot-select').innerHTML = allLots.map(l => `<option value="${l.id}" ${selectedLotId === l.id ? 'selected' : ''}>[${l.projet_code}] ${l.code_lot} — ${l.designation}</option>`).join('');
 }
 
+// Lit les fichiers d'un <input type=file> en dataURL base64
+function readFilesAsDataUrls(inputEl) {
+    const files = Array.from((inputEl && inputEl.files) || []);
+    return Promise.all(files.map(f => new Promise(resolve => {
+        const r = new FileReader();
+        r.onload = () => resolve({ name: f.name, dataUrl: r.result });
+        r.onerror = () => resolve(null);
+        r.readAsDataURL(f);
+    }))).then(arr => arr.filter(Boolean));
+}
+
 async function submitOS(id) {
     const data = Object.fromEntries(new FormData(document.getElementById('form-new-os')));
     if (!data.numero_os || !data.objet) { showToast('Erreur', 'Champs requis manquants.', 'danger'); return; }
     // Nettoyage : os_lie_id / date_fin_effet vides → null
     data.os_lie_id = data.os_lie_id ? parseInt(data.os_lie_id) : null;
     if (!data.date_fin_effet) data.date_fin_effet = null;
+    const fileInput = document.getElementById('os-file');
+    const hasFiles = fileInput && fileInput.files && fileInput.files.length > 0;
     try {
-        if (id) { await window.api.os.update(id, data); showToast('Succès', 'Ordre de service modifié.', 'success'); }
-        else { await window.api.os.create(data); showToast('Succès', 'Ordre de service créé. Joignez la version signée scannée (bouton trombone).', 'success'); }
+        let osId = id;
+        if (id) { await window.api.os.update(id, data); }
+        else { const res = await window.api.os.create(data); osId = res && res.lastInsertRowid; }
+        // Pièce(s) jointe(s) choisie(s) dans le formulaire → upload sur l'OS
+        if (osId && hasFiles) {
+            const files = await readFilesAsDataUrls(fileInput);
+            if (files.length) {
+                const acteur = currentUser.role === 'MOD' ? (currentUser.nom || 'MOD') : (currentUser.raison_sociale || currentUser.role);
+                await window.api.documents.uploadData({ files, meta: { entite_type: 'os', entite_id: osId, projet_id: window._osProjet || null, type_document: 'Autre', categorie: 'Pièce jointe', uploaded_by: acteur, uploaded_by_role: currentUser.role } });
+            }
+        }
+        showToast('Succès', id ? 'Ordre de service modifié.' : `Ordre de service créé${hasFiles ? ' avec pièce(s) jointe(s)' : ''}.`, 'success');
         closeModal();
         navigateTo('ordres-service');
     } catch (err) { showToast('Erreur', err.message, 'danger'); }

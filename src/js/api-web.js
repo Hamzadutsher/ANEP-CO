@@ -185,7 +185,8 @@
             open: id => { window.open('/api/docfile/' + id + tokenQS(), '_blank'); return Promise.resolve({ success: true }); },
             saveAs: id => { window.open('/api/docfile/' + id + '?dl=1' + (_token ? '&t=' + encodeURIComponent(_token) : ''), '_blank'); return Promise.resolve({ success: true }); },
             delete: id => rpc('documents:delete', id),
-            saveDataUrl: (dataUrl, meta) => rpc('documents:saveDataUrl', { dataUrl, meta })
+            saveDataUrl: (dataUrl, meta) => rpc('documents:saveDataUrl', { dataUrl, meta }),
+            uploadData: (payload) => rpc('documents:uploadData', payload)
         },
         photos: { getGallery: f => rpc('photos:getGallery', f) },
         backup: {

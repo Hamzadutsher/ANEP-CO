@@ -99,6 +99,9 @@ async function showApp() {
     // Build navigation for role
     buildNavigation(currentUser.role);
 
+    // Restaurer le projet actif (filtre global) si présent
+    if (typeof restoreActiveProjet === 'function') restoreActiveProjet();
+
     // Navigate to dashboard
     navigateTo('dashboard');
 

@@ -547,6 +547,30 @@ function setupIPC() {
         } catch (e) { return { success: false, error: e.message }; }
     });
 
+    // Upload de fichiers déjà lus (base64) — ex : pièce jointe choisie dans un formulaire
+    ipcMain.handle('documents:uploadData', (event, payload) => {
+        const { files, meta } = payload || {};
+        let count = 0;
+        (files || []).forEach(f => {
+            const m = /^data:([^;]+);base64,(.+)$/.exec(f.dataUrl || '');
+            if (!m) return;
+            const base = (f.name || 'fichier').replace(/[^a-zA-Z0-9._-]/g, '_');
+            const ext = (base.split('.').pop() || '').toLowerCase();
+            const stored = `${Date.now()}_${Math.floor(Math.random() * 100000)}_${base}`;
+            fs.writeFileSync(path.join(docsDir, stored), Buffer.from(m[2], 'base64'));
+            const size = fs.statSync(path.join(docsDir, stored)).size;
+            db.createDocument({
+                nom: f.name || 'fichier', nom_fichier: stored, type_document: (meta && meta.type_document) || 'Autre',
+                categorie: (meta && meta.categorie) || null, entite_type: (meta && meta.entite_type) || 'projet',
+                entite_id: (meta && meta.entite_id) || null, projet_id: (meta && meta.projet_id) || null,
+                taille: size, extension: ext, description: (meta && meta.description) || null, uploaded_by: (meta && meta.uploaded_by) || null
+            });
+            count++;
+        });
+        if (count && meta) db.logEvent({ acteur_type: meta.uploaded_by_role || 'MOD', action: 'Document(s) ajouté(s)', cible_type: meta.entite_type, cible_id: meta.entite_id, projet_id: meta.projet_id, details: `${count} fichier(s)` });
+        return { success: true, count };
+    });
+
     // ---- Paramètres / permissions ----
     ipcMain.handle('settings:get', () => db.getConfig());
     ipcMain.handle('settings:set', (event, obj) => db.setConfig(obj));
