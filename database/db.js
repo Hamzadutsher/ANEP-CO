@@ -592,6 +592,57 @@ class AppDatabase {
             WHERE l.projet_id = ? ORDER BY os.date_notification DESC`, [projetId]);
     }
 
+    // Générateur d'axe de délai : extrait OS + décomptes pour déduire le délai restant (par lot + projet)
+    getDelaiAxis(projetId) {
+        const toDate = s => s ? new Date(String(s).slice(0, 10) + 'T00:00:00Z') : null;
+        const daysBetween = (a, b) => Math.round((b - a) / 86400000);
+        const addDays = (d, n) => { const x = new Date(d); x.setUTCDate(x.getUTCDate() + n); return x; };
+        const fmt = d => d ? d.toISOString().slice(0, 10) : null;
+        const today = new Date(new Date().toISOString().slice(0, 10) + 'T00:00:00Z');
+        const lots = this.all('SELECT id, code_lot, designation FROM lots WHERE projet_id = ? ORDER BY code_lot', [projetId]);
+        const out = { projetId, today: fmt(today), lots: [] };
+        for (const lot of lots) {
+            const os = this.all('SELECT * FROM ordres_service WHERE lot_id = ? ORDER BY date_effet, id', [lot.id]);
+            const decs = this.all("SELECT numero, date_decompte, montant_net_a_payer, statut, date_ordonnancement, date_paiement FROM decomptes WHERE lot_id = ? ORDER BY date_decompte, id", [lot.id]);
+            const commence = os.find(o => o.type_os === 'Commencement' && o.date_effet);
+            if (!commence) { out.lots.push({ id: lot.id, code_lot: lot.code_lot, designation: lot.designation, hasData: false }); continue; }
+            const debut = toDate(commence.date_effet);
+            const baseDelai = commence.delai_jours || 0;
+            const prolong = os.filter(o => o.type_os === 'Prolongation').reduce((s, o) => s + (o.delai_jours || 0), 0);
+            // Périodes d'arrêt (Arrêt → Reprise) : décalent la date de fin
+            let suspended = 0; const arrets = [];
+            const ar = os.filter(o => ['Arrêt', 'Reprise'].includes(o.type_os) && o.date_effet).sort((a, b) => String(a.date_effet).localeCompare(String(b.date_effet)));
+            let open = null;
+            for (const o of ar) {
+                if (o.type_os === 'Arrêt') { if (!open) open = toDate(o.date_effet); }
+                else if (o.type_os === 'Reprise' && open) { const d = daysBetween(open, toDate(o.date_effet)); if (d > 0) { suspended += d; arrets.push({ debut: fmt(open), fin: fmt(toDate(o.date_effet)), jours: d }); } open = null; }
+            }
+            if (open) { const d = daysBetween(open, today); if (d > 0) { suspended += d; arrets.push({ debut: fmt(open), fin: null, jours: d, enCours: true }); } }
+            const resilie = os.find(o => o.type_os === 'Résiliation' && o.date_effet);
+            const delaiContractuel = baseDelai + prolong;
+            const finPrev = addDays(debut, delaiContractuel + suspended);
+            const ecoulesNet = Math.max(0, daysBetween(debut, today) - suspended);
+            const restant = daysBetween(today, finPrev);
+            const pct = delaiContractuel > 0 ? Math.min(100, Math.round(ecoulesNet / delaiContractuel * 100)) : 0;
+            const totalPaye = decs.filter(d => d.statut === 'Payé').reduce((s, d) => s + (d.montant_net_a_payer || 0), 0);
+            const dernierPaye = decs.filter(d => d.date_paiement).sort((a, b) => String(b.date_paiement).localeCompare(String(a.date_paiement)))[0] || null;
+            out.lots.push({
+                id: lot.id, code_lot: lot.code_lot, designation: lot.designation, hasData: true,
+                debut: fmt(debut), baseDelai, prolong, suspended, arrets,
+                delaiContractuel, finPrev: fmt(finPrev), ecoulesNet, restant, pct,
+                enRetard: !resilie && restant < 0, resilie: resilie ? fmt(toDate(resilie.date_effet)) : null,
+                nbDecomptes: decs.length, totalPaye, dernierPaiement: dernierPaye ? dernierPaye.date_paiement : null,
+                events: [
+                    { date: fmt(debut), label: 'Commencement', type: 'os' },
+                    ...os.filter(o => o.type_os !== 'Commencement' && o.date_effet).map(o => ({ date: fmt(toDate(o.date_effet)), label: o.type_os + ' (' + o.numero_os + ')', type: 'os' })),
+                    ...decs.filter(d => d.date_decompte).map(d => ({ date: fmt(toDate(d.date_decompte)), label: 'Décompte ' + d.numero + (d.statut === 'Payé' ? ' payé' : ''), type: 'decompte', statut: d.statut })),
+                    { date: fmt(finPrev), label: 'Fin prévisionnelle', type: 'fin' }
+                ].filter(e => e.date).sort((a, b) => a.date.localeCompare(b.date))
+            });
+        }
+        return out;
+    }
+
     // Lots dépendants (cibles) d'un lot source, via les interfaces déclarées
     getDependentLots(lotId) {
         return this.all(`SELECT DISTINCT lc.id, lc.code_lot, lc.designation, li.type_interface

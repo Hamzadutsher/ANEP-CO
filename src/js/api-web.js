@@ -117,6 +117,7 @@
             getDependentLots: id => rpc('os:getDependentLots', id),
             create: d => rpc('os:create', d), update: (id, d) => rpc('os:update', id, d), delete: id => rpc('os:delete', id)
         },
+        timeline: { axis: id => rpc('timeline:axis', id) },
         essais: {
             getByOuvrage: id => rpc('essais:getByOuvrage', id), getEnCours: id => rpc('essais:getEnCours', id),
             create: d => rpc('essais:create', d), updateResultat: (id, d) => rpc('essais:updateResultat', id, d),

@@ -107,6 +107,9 @@ contextBridge.exposeInMainWorld('api', {
         update: (id, data) => ipcRenderer.invoke('os:update', id, data),
         delete: (id) => ipcRenderer.invoke('os:delete', id)
     },
+    timeline: {
+        axis: (projetId) => ipcRenderer.invoke('timeline:axis', projetId)
+    },
 
     // Essais Labo
     essais: {

@@ -148,6 +148,7 @@ const H = {
     'os:getByLot': a => db.getOSByLot(a[0]),
     'os:getByProjet': a => db.getOSByProjet(a[0]),
     'os:getDependentLots': a => db.getDependentLots(a[0]),
+    'timeline:axis': a => db.getDelaiAxis(a[0]),
     'os:create': a => db.createOS(a[0]),
     'os:update': a => db.updateOS(a[0], a[1]),
     'os:delete': a => db.deleteOS(a[0]),

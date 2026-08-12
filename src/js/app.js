@@ -1772,6 +1772,90 @@ async function exportDelais(projetId) {
 // ============================================================
 // ORDRES DE SERVICE
 // ============================================================
+// Générateur d'axe de délai — cycle complet du projet (dates OS + décomptes → délai restant)
+async function renderDelaiAxis(container) {
+    const isM = isMOD();
+    const projets = isM ? await window.api.projets.getAll() : [];
+    const projetId = isM ? (window._axeProjet && projets.some(p => p.id === window._axeProjet) ? window._axeProjet : projets[0]?.id) : currentUser.projet_id;
+    if (!projetId) { container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📏</div><h4>Aucun projet</h4></div>'; return; }
+    if (isM) window._axeProjet = projetId;
+    const axis = await window.api.timeline.axis(projetId);
+    window._axeData = axis;
+    const withData = axis.lots.filter(l => l.hasData);
+
+    const posPct = (lot, dateStr) => {
+        const d0 = new Date(lot.debut).getTime(), d1 = new Date(lot.finPrev).getTime(), dx = new Date(dateStr).getTime();
+        if (!d1 || d1 <= d0) return 0;
+        return Math.max(0, Math.min(100, Math.round((dx - d0) / (d1 - d0) * 100)));
+    };
+    const evColor = (e) => e.type === 'fin' ? 'var(--danger)' : (e.type === 'decompte' ? (e.statut === 'Payé' ? 'var(--success)' : 'var(--warning)') : 'var(--primary)');
+
+    const lotCard = (lot) => {
+        const todayPos = posPct(lot, axis.today);
+        const restBadge = lot.resilie ? `<span class="badge badge-danger">Résilié le ${formatDate(lot.resilie)}</span>` : (lot.restant < 0 ? `<span class="badge badge-danger">Dépassé de ${-lot.restant} j</span>` : `<span class="badge badge-success">${lot.restant} j restants</span>`);
+        return `
+      <div class="card mt-lg">
+        <div class="card-header d-flex justify-between align-center flex-wrap gap-md">
+          <h4><span class="badge badge-info">${lot.code_lot}</span> ${lot.designation}</h4>
+          <div>${restBadge}</div>
+        </div>
+        <div class="card-body">
+          <div class="stats-grid mb-md">
+            <div class="stat-card"><div class="stat-content"><div class="stat-value text-sm">${formatDate(lot.debut)}</div><div class="stat-label">Début (OS)</div></div></div>
+            <div class="stat-card"><div class="stat-content"><div class="stat-value text-sm">${lot.delaiContractuel} j${lot.prolong ? ` <span class="text-xs text-muted">(+${lot.prolong})</span>` : ''}</div><div class="stat-label">Délai contractuel</div></div></div>
+            <div class="stat-card"><div class="stat-content"><div class="stat-value text-sm">${lot.suspended} j</div><div class="stat-label">Jours d'arrêt</div></div></div>
+            <div class="stat-card"><div class="stat-content"><div class="stat-value text-sm">${formatDate(lot.finPrev)}</div><div class="stat-label">Fin prévisionnelle</div></div></div>
+          </div>
+          <div class="d-flex justify-between text-xs text-muted mb-sm flex-wrap gap-sm"><span>Consommé : <strong>${lot.ecoulesNet} j (${lot.pct}%)</strong></span><span>${lot.nbDecomptes} décompte(s) · ${formatCurrency(lot.totalPaye)} payé</span></div>
+          <div style="position:relative;height:60px;margin:24px 8px 28px;">
+            <div style="position:absolute;top:26px;left:0;right:0;height:6px;background:var(--bg-tertiary);border-radius:3px;"></div>
+            <div style="position:absolute;top:26px;left:0;width:${todayPos}%;height:6px;background:var(--primary);border-radius:3px;"></div>
+            <div style="position:absolute;top:10px;left:${todayPos}%;transform:translateX(-50%);text-align:center;z-index:2;">
+              <div style="font-size:9px;color:var(--danger);font-weight:700;white-space:nowrap;">Auj.</div>
+              <div style="width:2px;height:32px;background:var(--danger);margin:0 auto;"></div>
+            </div>
+            ${lot.events.map(e => { const x = posPct(lot, e.date); return `<div title="${e.label} · ${formatDate(e.date)}" style="position:absolute;top:22px;left:${x}%;transform:translateX(-50%);width:13px;height:13px;border-radius:50%;background:${evColor(e)};border:2px solid var(--bg-primary);cursor:help;z-index:1;"></div>`; }).join('')}
+          </div>
+        </div>
+      </div>`;
+    };
+
+    container.innerHTML = `
+    <div class="page-header animate-fade-in-up">
+      <div><h2>Axe de délai — cycle complet</h2><p>Extraction automatique des dates (OS + décomptes) pour déduire le délai restant</p></div>
+      <button class="btn btn-secondary" onclick="generateDelaiAxisDoc()"><i data-lucide="printer"></i> Générer / imprimer</button>
+    </div>
+    ${isM ? `<div class="filter-bar animate-fade-in-up delay-1">
+      <select class="form-control" onchange="window._axeProjet=parseInt(this.value);renderDelaiAxis(document.getElementById('hub-axe'))">
+        ${projets.map(p => `<option value="${p.id}" ${p.id === projetId ? 'selected' : ''}>${p.code_projet} — ${p.intitule}</option>`).join('')}
+      </select>
+    </div>` : ''}
+    <div class="d-flex gap-md flex-wrap text-xs text-muted mb-md">
+      <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--primary);vertical-align:-1px;"></span> OS</span>
+      <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--warning);vertical-align:-1px;"></span> Décompte</span>
+      <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--success);vertical-align:-1px;"></span> Décompte payé</span>
+      <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--danger);vertical-align:-1px;"></span> Fin prévisionnelle</span>
+    </div>
+    ${withData.length ? withData.map(lotCard).join('') : '<div class="empty-state"><div class="empty-state-icon">📏</div><h4>Aucun OS de commencement</h4><p>Émettez un OS de commencement (avec délai) pour générer l\'axe de délai.</p></div>'}
+  `;
+    if (window.lucide) lucide.createIcons({ node: container });
+}
+
+async function generateDelaiAxisDoc() {
+    const axis = window._axeData;
+    if (!axis) { showToast('Info', 'Aucune donnée à générer.', 'info'); return; }
+    const withData = axis.lots.filter(l => l.hasData);
+    const rows = withData.map(l => `<tr><td>${l.code_lot} — ${l.designation}</td><td>${l.debut || '—'}</td><td>${l.delaiContractuel} j${l.prolong ? ' (+' + l.prolong + ')' : ''}</td><td>${l.suspended} j</td><td>${l.finPrev || '—'}</td><td style="font-weight:bold;color:${l.restant < 0 ? '#c0392b' : '#27ae60'}">${l.resilie ? 'Résilié' : (l.restant < 0 ? 'Dépassé ' + (-l.restant) + ' j' : l.restant + ' j')}</td><td>${l.pct}%</td><td>${formatCurrency(l.totalPaye)}</td></tr>`).join('');
+    const html = `<h1 style="font-size:18px;">Axe de délai — cycle du projet</h1>
+      <p style="color:#555;font-size:12px;">Édité le ${new Date().toLocaleDateString('fr-FR')} · Déduction automatique à partir des OS et des décomptes</p>
+      <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%;font-size:12px;">
+        <thead style="background:#eef2ff;"><tr><th>Lot</th><th>Début</th><th>Délai contractuel</th><th>Jours d'arrêt</th><th>Fin prévisionnelle</th><th>Délai restant</th><th>% consommé</th><th>Payé</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="8" style="text-align:center;">Aucun OS de commencement</td></tr>'}</tbody>
+      </table>`;
+    try { await window.api.docs.generate({ html, filename: 'axe_delai_projet_' + (axis.projetId || '') }); showToast('Généré', 'Axe de délai généré (imprimable / PDF).', 'success'); }
+    catch (e) { showToast('Erreur', e.message, 'danger'); }
+}
+
 async function renderOrdresService(container) {
     updatePageTitle('Ordres de Service');
     const projets = await window.api.projets.getAll();
@@ -3590,6 +3674,7 @@ function renderSuiviHub(c) {
 function renderPlanningHub(c) {
     return renderTabHub(c, 'Planning & délais', [
         { pid: 'hub-delais', label: 'Délais & planning', icon: 'calendar-clock', render: renderDelais },
+        { pid: 'hub-axe', label: 'Axe de délai', icon: 'gantt-chart', render: renderDelaiAxis },
         { pid: 'hub-os', label: 'Ordres de service', icon: 'file-text', render: renderOrdresService },
         { pid: 'hub-meteo', label: 'Météo & intempéries', icon: 'cloud-sun-rain', render: renderMeteo }
     ]);

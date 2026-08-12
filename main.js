@@ -205,6 +205,7 @@ function setupIPC() {
     ipcMain.handle('os:getByLot', (event, lotId) => db.getOSByLot(lotId));
     ipcMain.handle('os:getByProjet', (event, projetId) => db.getOSByProjet(projetId));
     ipcMain.handle('os:getDependentLots', (event, lotId) => db.getDependentLots(lotId));
+    ipcMain.handle('timeline:axis', (event, projetId) => db.getDelaiAxis(projetId));
     ipcMain.handle('os:create', (event, data) => db.createOS(data));
 
     // ---- Essais Labo ----
