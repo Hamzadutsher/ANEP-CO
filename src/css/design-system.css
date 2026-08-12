@@ -1,0 +1,303 @@
+/* ============================================
+   ANEP MOD — Design System
+   Couleurs, Typographie, Variables globales
+   ============================================ */
+
+/* Police unifiée : Cairo (open-source, intégrée localement — 100% hors-ligne) */
+@font-face { font-family: 'Cairo'; font-style: normal; font-weight: 400; font-display: swap; src: url('../vendor/fonts/cairo-400.woff2') format('woff2'); }
+@font-face { font-family: 'Cairo'; font-style: normal; font-weight: 500; font-display: swap; src: url('../vendor/fonts/cairo-500.woff2') format('woff2'); }
+@font-face { font-family: 'Cairo'; font-style: normal; font-weight: 600; font-display: swap; src: url('../vendor/fonts/cairo-600.woff2') format('woff2'); }
+@font-face { font-family: 'Cairo'; font-style: normal; font-weight: 700; font-display: swap; src: url('../vendor/fonts/cairo-700.woff2') format('woff2'); }
+
+:root {
+    /* ---- Couleurs ANEP ---- */
+    --primary: #1a3a6b;
+    --primary-light: #2a5298;
+    --primary-dark: #0f2445;
+    --primary-glow: rgba(26, 58, 107, 0.4);
+    
+    --secondary: #d4a843;
+    --secondary-light: #e8c46a;
+    --secondary-dark: #b08930;
+    
+    --accent-teal: #00897b;
+    --accent-teal-light: #26a69a;
+    
+    /* ---- Sémantiques ---- */
+    --success: #2e7d32;
+    --success-light: #4caf50;
+    --success-bg: rgba(46, 125, 50, 0.12);
+    
+    --warning: #e65100;
+    --warning-light: #ff9800;
+    --warning-bg: rgba(230, 81, 0, 0.12);
+    
+    --danger: #c62828;
+    --danger-light: #ef5350;
+    --danger-bg: rgba(198, 40, 40, 0.12);
+    
+    --info: #1565c0;
+    --info-light: #42a5f5;
+    --info-bg: rgba(21, 101, 192, 0.12);
+    
+    /* ---- Fond (Light Mode — charte ANEP) ---- */
+    --bg-base: #eef2f8;
+    --bg-primary: #ffffff;
+    --bg-secondary: #f4f7fc;
+    --bg-tertiary: #e9eff8;
+    --bg-card: #ffffff;
+    --bg-card-hover: #f7fafe;
+    --bg-elevated: #ffffff;
+    --bg-input: #ffffff;
+    --bg-overlay: rgba(15, 30, 60, 0.45);
+
+    /* ---- Texte ---- */
+    --text-primary: #15233c;
+    --text-secondary: #46587a;
+    --text-muted: #8193ae;
+    --text-inverse: #ffffff;
+    --text-accent: #a67c1e;
+
+    /* ---- Bordures ---- */
+    --border-color: #dbe3ef;
+    --border-color-hover: #c1d0e4;
+    --border-color-active: rgba(212, 168, 67, 0.6);
+
+    /* ---- Ombres (douces, teintées bleu ANEP) ---- */
+    --shadow-sm: 0 1px 2px rgba(26, 58, 107, 0.06), 0 1px 3px rgba(26, 58, 107, 0.08);
+    --shadow-md: 0 2px 6px rgba(26, 58, 107, 0.08), 0 6px 14px rgba(26, 58, 107, 0.07);
+    --shadow-lg: 0 10px 28px rgba(26, 58, 107, 0.12), 0 4px 10px rgba(26, 58, 107, 0.08);
+    --shadow-xl: 0 20px 48px rgba(26, 58, 107, 0.16), 0 8px 18px rgba(26, 58, 107, 0.10);
+    --shadow-glow: 0 0 22px rgba(42, 82, 152, 0.18);
+    --shadow-gold: 0 0 22px rgba(212, 168, 67, 0.25);
+
+    /* ---- Glassmorphism ---- */
+    --glass-bg: rgba(255, 255, 255, 0.85);
+    --glass-border: rgba(26, 58, 107, 0.10);
+    --glass-blur: blur(12px);
+    
+    /* ---- Spacing ---- */
+    --space-xs: 4px;
+    --space-sm: 8px;
+    --space-md: 16px;
+    --space-lg: 24px;
+    --space-xl: 32px;
+    --space-2xl: 48px;
+    --space-3xl: 64px;
+    
+    /* ---- Border Radius ---- */
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 14px;
+    --radius-xl: 20px;
+    --radius-full: 50%;
+    
+    /* ---- Typography ---- */
+    --font-primary: 'Cairo', 'Segoe UI', Tahoma, Arial, sans-serif;
+    --font-display: 'Cairo', 'Segoe UI', Tahoma, Arial, sans-serif;
+    
+    --text-xs: 0.8rem;
+    --text-sm: 0.875rem;
+    --text-base: 0.98rem;
+    --text-md: 1.06rem;
+    --text-lg: 1.2rem;
+    --text-xl: 1.35rem;
+    --text-2xl: 1.65rem;
+    --text-3xl: 2rem;
+    --text-4xl: 2.4rem;
+    --text-5xl: 3.1rem;
+    
+    /* ---- Transitions ---- */
+    --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-base: 250ms cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-slow: 400ms cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-spring: 500ms cubic-bezier(0.34, 1.56, 0.64, 1);
+    
+    /* ---- Z-Index ---- */
+    --z-dropdown: 100;
+    --z-sticky: 200;
+    --z-modal-backdrop: 300;
+    --z-modal: 400;
+    --z-notification: 500;
+    --z-tooltip: 600;
+    
+    /* ---- Sidebar ---- */
+    --sidebar-width: 280px;
+    --sidebar-collapsed: 72px;
+    --header-height: 64px;
+    
+    /* ---- Role Colors ---- */
+    --role-mod: #1a3a6b;
+    --role-architecte: #6a1b9a;
+    --role-bet: #00695c;
+    --role-bct: #e65100;
+    --role-laboratoire: #1565c0;
+    --role-topographe: #2e7d32;
+    --role-entreprise: #c62828;
+}
+
+/* ---- Reset & Base ---- */
+*, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+html {
+    font-size: 16.5px;
+    -webkit-text-size-adjust: 100%;
+    scroll-behavior: smooth;
+}
+
+body {
+    font-family: var(--font-primary);
+    font-size: var(--text-base);
+    font-weight: 400;
+    line-height: 1.6;
+    letter-spacing: 0.005em;
+    color: var(--text-primary);
+    background-color: var(--bg-base);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    overflow: hidden;
+    height: 100vh;
+}
+
+h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-display);
+    font-weight: 700;
+    line-height: 1.3;
+    letter-spacing: -0.011em;
+    color: var(--text-primary);
+}
+
+h1 { font-size: var(--text-4xl); }
+h2 { font-size: var(--text-3xl); }
+h3 { font-size: var(--text-2xl); }
+h4 { font-size: var(--text-xl); }
+h5 { font-size: var(--text-lg); }
+h6 { font-size: var(--text-md); }
+
+a {
+    color: var(--primary-light);
+    text-decoration: none;
+    transition: color var(--transition-fast);
+}
+
+a:hover {
+    color: var(--primary);
+    text-decoration: underline;
+}
+
+img {
+    max-width: 100%;
+    height: auto;
+}
+
+/* ---- Scrollbar Custom ---- */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--bg-primary);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--border-color);
+    border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--border-color-hover);
+}
+
+/* ---- Selection ---- */
+::selection {
+    background-color: rgba(212, 168, 67, 0.3);
+    color: var(--text-primary);
+}
+
+/* ---- Utility Classes ---- */
+.text-primary { color: var(--text-primary) !important; }
+.text-secondary { color: var(--text-secondary) !important; }
+.text-muted { color: var(--text-muted) !important; }
+.text-accent { color: var(--text-accent) !important; }
+.text-success { color: var(--success) !important; }
+.text-warning { color: var(--warning) !important; }
+.text-danger { color: var(--danger) !important; }
+.text-info { color: var(--info) !important; }
+
+.font-display { font-family: var(--font-display) !important; }
+.font-bold { font-weight: 700 !important; }
+.font-semibold { font-weight: 600 !important; }
+.font-medium { font-weight: 500 !important; }
+
+.text-xs { font-size: var(--text-xs) !important; }
+.text-sm { font-size: var(--text-sm) !important; }
+.text-base { font-size: var(--text-base) !important; }
+.text-lg { font-size: var(--text-lg) !important; }
+.text-xl { font-size: var(--text-xl) !important; }
+.text-2xl { font-size: var(--text-2xl) !important; }
+
+.text-center { text-align: center !important; }
+.text-right { text-align: right !important; }
+.text-uppercase { text-transform: uppercase !important; letter-spacing: 0.05em; }
+
+.d-flex { display: flex !important; }
+.d-grid { display: grid !important; }
+.d-none { display: none !important; }
+.d-block { display: block !important; }
+
+.flex-column { flex-direction: column !important; }
+.flex-wrap { flex-wrap: wrap !important; }
+.align-center { align-items: center !important; }
+.align-start { align-items: flex-start !important; }
+.align-end { align-items: flex-end !important; }
+.justify-center { justify-content: center !important; }
+.justify-between { justify-content: space-between !important; }
+.justify-end { justify-content: flex-end !important; }
+.gap-xs { gap: var(--space-xs) !important; }
+.gap-sm { gap: var(--space-sm) !important; }
+.gap-md { gap: var(--space-md) !important; }
+.gap-lg { gap: var(--space-lg) !important; }
+.gap-xl { gap: var(--space-xl) !important; }
+.flex-1 { flex: 1 !important; }
+
+.mt-sm { margin-top: var(--space-sm) !important; }
+.mt-md { margin-top: var(--space-md) !important; }
+.mt-lg { margin-top: var(--space-lg) !important; }
+.mt-xl { margin-top: var(--space-xl) !important; }
+.mb-sm { margin-bottom: var(--space-sm) !important; }
+.mb-md { margin-bottom: var(--space-md) !important; }
+.mb-lg { margin-bottom: var(--space-lg) !important; }
+.mr-sm { margin-right: var(--space-sm) !important; }
+.mr-md { margin-right: var(--space-md) !important; }
+.ml-sm { margin-left: var(--space-sm) !important; }
+.ml-auto { margin-left: auto !important; }
+
+.p-sm { padding: var(--space-sm) !important; }
+.p-md { padding: var(--space-md) !important; }
+.p-lg { padding: var(--space-lg) !important; }
+.p-xl { padding: var(--space-xl) !important; }
+
+.w-full { width: 100% !important; }
+.h-full { height: 100% !important; }
+
+.overflow-auto { overflow: auto !important; }
+.overflow-hidden { overflow: hidden !important; }
+.truncate {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.relative { position: relative !important; }
+.absolute { position: absolute !important; }
+
+.rounded-sm { border-radius: var(--radius-sm) !important; }
+.rounded-md { border-radius: var(--radius-md) !important; }
+.rounded-lg { border-radius: var(--radius-lg) !important; }
+.rounded-full { border-radius: var(--radius-full) !important; }

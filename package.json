@@ -1,0 +1,74 @@
+{
+  "name": "anep-mod-app",
+  "version": "1.0.0",
+  "description": "ANEP - Application de Gestion de la Maîtrise d'Ouvrage Déléguée",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "serve": "node server.js",
+    "web": "node server.js",
+    "gen-cert": "node scripts/gen-cert.js",
+    "dist": "electron-builder --win nsis",
+    "pack": "electron-builder --dir"
+  },
+  "author": "ANEP - Agence Nationale des Équipements Publics",
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "express": "^4.21.2",
+    "selfsigned": "^2.4.1",
+    "sql.js": "^1.11.0"
+  },
+  "allowScripts": {
+    "electron@33.0.0": true
+  },
+  "build": {
+    "appId": "ma.anep.mod",
+    "productName": "ANEP MOD",
+    "copyright": "© ANEP - Agence Nationale des Équipements Publics",
+    "asar": false,
+    "directories": {
+      "output": "dist-installer",
+      "buildResources": "src/assets"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "database/**/*",
+      "src/**/*",
+      "node_modules/**/*",
+      "!**/*.bak",
+      "!database.bak/**",
+      "!src.bak/**",
+      "!data/**"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "src/assets/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "ANEP MOD",
+      "installerLanguages": [
+        "fr_FR"
+      ],
+      "language": "1036"
+    }
+  }
+}

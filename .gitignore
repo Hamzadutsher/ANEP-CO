@@ -1,0 +1,30 @@
+# Dépendances
+node_modules/
+
+# Build / distribution (installateur ~370 Mo)
+dist-installer/
+dist/
+
+# Données d'exécution : base, documents, photos, sauvegardes, certificats (clé privée) — NE PAS versionner
+data/
+
+# Sauvegardes de développement
+*.bak
+database.bak/
+src.bak/
+main.js.bak
+preload.js.bak
+
+# Logs
+*.log
+npm-debug.log*
+
+# Config locale de l'agent / IDE
+.claude/settings.local.json
+
+# OS / éditeurs
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp

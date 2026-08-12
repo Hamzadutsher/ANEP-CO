@@ -1,0 +1,11 @@
+node_modules
+dist-installer
+data
+*.bak
+database.bak
+src.bak
+main.js
+preload.js
+*.log
+.git
+.gitignore

@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="fr" dir="ltr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:;">
+    <title>ANEP MOD — Gestion de la Maîtrise d'Ouvrage Déléguée</title>
+    <meta name="description" content="Application de gestion des projets en maîtrise d'ouvrage déléguée - ANEP">
+
+    <!-- Styles -->
+    <link rel="stylesheet" href="css/design-system.css">
+    <link rel="stylesheet" href="css/layout.css">
+    <link rel="stylesheet" href="css/components.css">
+    <link rel="stylesheet" href="css/animations.css">
+
+    <!-- Bibliothèques locales (fonctionnement hors-ligne) -->
+    <script src="vendor/lucide.js"></script>
+    <script src="vendor/chart.umd.min.js"></script>
+</head>
+<body>
+    <!-- ============ LOGIN SCREEN ============ -->
+    <div id="login-screen" class="login-screen">
+        <div class="login-card animate-fade-in-up">
+            <div class="login-logo">
+                <img src="assets/anep-logo.png" onerror="this.onerror=null;this.src='assets/icon.png'" class="login-logo-img" alt="ANEP">
+                <h1>ANEP MOD</h1>
+                <p>Gestion de la Maîtrise d'Ouvrage Déléguée</p>
+            </div>
+            
+            <div id="login-error" class="login-error">
+                Identifiants incorrects. Veuillez réessayer.
+            </div>
+            
+            <form id="login-form">
+                <div class="form-group">
+                    <label class="form-label" for="login-username">Nom d'utilisateur</label>
+                    <input type="text" id="login-username" class="form-control" placeholder="Entrez votre identifiant" required autocomplete="off">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="login-password">Mot de passe</label>
+                    <input type="password" id="login-password" class="form-control" placeholder="Entrez votre mot de passe" required>
+                </div>
+                <label class="login-remember">
+                    <input type="checkbox" id="login-remember">
+                    <span>Se souvenir de mon identifiant et mot de passe</span>
+                </label>
+                <button type="submit" class="btn btn-primary w-full btn-lg" id="login-btn">
+                    <span id="login-btn-text">Se connecter</span>
+                    <div id="login-spinner" class="spinner spinner-sm" style="display:none; border-top-color: white;"></div>
+                </button>
+            </form>
+            
+            <div class="login-footer">
+                <p>Agence Nationale des Équipements Publics</p>
+                <p style="margin-top: 4px; font-size: 10px;">MOD: admin / admin2026</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============ APP SHELL ============ -->
+    <div id="app-shell" class="app-shell" style="display: none;">
+        
+        <!-- Sidebar -->
+        <aside id="sidebar" class="sidebar">
+            <div class="sidebar-header">
+                <img src="assets/anep-logo.png" onerror="this.onerror=null;this.src='assets/icon.png'" class="sidebar-logo-img" alt="ANEP">
+                <div class="sidebar-brand">
+                    <h3>ANEP MOD</h3>
+                    <span>Maîtrise d'Ouvrage</span>
+                </div>
+            </div>
+            
+            <div id="sidebar-user" class="sidebar-user">
+                <div id="user-avatar" class="sidebar-user-avatar" style="background: var(--primary);">AD</div>
+                <div class="sidebar-user-info">
+                    <div id="user-name" class="sidebar-user-name">Administrateur</div>
+                    <div id="user-role" class="sidebar-user-role">MOD</div>
+                </div>
+            </div>
+            
+            <nav id="sidebar-nav" class="sidebar-nav">
+                <!-- Navigation items will be injected by JS based on role -->
+            </nav>
+            
+            <div class="sidebar-footer">
+                <div class="nav-item" id="btn-logout" onclick="handleLogout()">
+                    <span class="nav-item-icon"><i data-lucide="log-out"></i></span>
+                    <span class="nav-item-text">Déconnexion</span>
+                </div>
+            </div>
+        </aside>
+        
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Header -->
+            <header id="app-header" class="header">
+                <div class="header-left">
+                    <h1 id="page-title" class="header-title">Dashboard</h1>
+                </div>
+                <div class="header-right">
+                    <div class="header-search">
+                        <span class="search-icon"><i data-lucide="search"></i></span>
+                        <input type="text" placeholder="Rechercher..." id="global-search">
+                    </div>
+                    <div id="header-weather" class="header-weather" style="display:none;" title="Météo du chantier" onclick="navigateTo('meteo')"></div>
+                    <button class="notif-btn" id="btn-notifications" onclick="toggleNotifications()">
+                        <i data-lucide="bell"></i>
+                        <span id="notif-count" class="notif-count" style="display:none;">0</span>
+                    </button>
+                </div>
+            </header>
+            
+            <!-- Page Content (SPA routing target) -->
+            <div id="page-content" class="page-content">
+                <!-- Pages rendered here -->
+            </div>
+        </main>
+    </div>
+
+    <!-- ============ MODAL CONTAINER ============ -->
+    <div id="modal-backdrop" class="modal-backdrop" onclick="closeModal(event)">
+        <div id="modal-container" class="modal" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h3 id="modal-title">Modal</h3>
+                <button class="modal-close" onclick="closeModal()">✕</button>
+            </div>
+            <div id="modal-body" class="modal-body"></div>
+            <div id="modal-footer" class="modal-footer"></div>
+        </div>
+    </div>
+    
+    <!-- ============ TOAST CONTAINER ============ -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <!-- ============ SVG DEFS for Gauges ============ -->
+    <svg width="0" height="0" style="position: absolute;">
+        <defs>
+            <linearGradient id="gaugeGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" style="stop-color: var(--primary-light);" />
+                <stop offset="100%" style="stop-color: var(--secondary);" />
+            </linearGradient>
+        </defs>
+    </svg>
+
+    <!-- Application JS -->
+    <script src="js/api-web.js"></script>
+    <script src="js/utils.js"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/navigation.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>

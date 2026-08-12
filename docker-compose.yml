@@ -1,0 +1,13 @@
+services:
+  anep-mod:
+    build: .
+    container_name: anep-mod-web
+    ports:
+      - "3000:3000"   # HTTP
+      - "3443:3443"   # HTTPS (si certificat présent dans data/certs/)
+    volumes:
+      - ./data:/app/data   # base, documents, photos, sauvegardes partagés/persistants
+    environment:
+      - PORT=3000
+      - HTTPS_PORT=3443
+    restart: unless-stopped
