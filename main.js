@@ -219,6 +219,22 @@ function setupIPC() {
     ipcMain.handle('gpa:resolveDesordre', (event, id) => db.resolveGpaDesordre(id));
     ipcMain.handle('gpa:deleteDesordre', (event, id) => db.deleteGpaDesordre(id));
     ipcMain.handle('budget:get', (event, projetId) => db.getProjetBudget(projetId));
+    ipcMain.handle('planpins:getByPlan', (event, planDocId) => db.getPlanPins(planDocId));
+    ipcMain.handle('planpins:create', (event, data) => db.createPlanPin(data));
+    ipcMain.handle('planpins:update', (event, id, data) => db.updatePlanPin(id, data));
+    ipcMain.handle('planpins:delete', (event, id) => db.deletePlanPin(id));
+    ipcMain.handle('planpins:stats', (event, projetId) => db.getPlanPinStats(projetId));
+    ipcMain.handle('signalements:getByProjet', (event, projetId) => db.getSignalementsByProjet(projetId));
+    ipcMain.handle('signalements:create', (event, data) => db.createSignalement(data));
+    ipcMain.handle('signalements:updateStatut', (event, id, statut) => db.updateSignalementStatut(id, statut));
+    ipcMain.handle('signalements:delete', (event, id) => db.deleteSignalement(id));
+    ipcMain.handle('signalements:stats', (event, projetId) => db.getSignalementStats(projetId));
+    ipcMain.handle('constats:getByProjet', (event, projetId) => db.getConstatsByProjet(projetId));
+    ipcMain.handle('constats:create', (event, data) => db.createConstat(data));
+    ipcMain.handle('constats:delete', (event, id) => db.deleteConstat(id));
+    ipcMain.handle('checklist:get', (event, typeReception) => db.getChecklistItems(typeReception));
+    ipcMain.handle('checklist:add', (event, data) => db.addChecklistItem(data));
+    ipcMain.handle('checklist:delete', (event, id) => db.deleteChecklistItem(id));
     ipcMain.handle('os:create', (event, data) => db.createOS(data));
 
     // ---- Essais Labo ----

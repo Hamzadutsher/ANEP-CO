@@ -1098,9 +1098,86 @@ class AppDatabase {
         const params = [];
         if (filters.projetId) { sql += ' AND d.projet_id = ?'; params.push(filters.projetId); }
         if (filters.categorie) { sql += ' AND d.categorie = ?'; params.push(filters.categorie); }
+        if (filters.entiteType) { sql += ' AND d.entite_type = ?'; params.push(filters.entiteType); }
+        if (filters.entiteId) { sql += ' AND d.entite_id = ?'; params.push(filters.entiteId); }
         sql += ' ORDER BY d.created_at DESC LIMIT ' + (filters.limit || 300);
         return this.all(sql, params);
     }
+
+    // ---- Réserves épinglées sur plan ----
+    createPlanPin(data) {
+        const res = this.run(`INSERT INTO plan_pins (projet_id, plan_doc_id, x, y, label, description, gravite, statut, created_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'Ouvert', ?)`,
+            [data.projet_id, data.plan_doc_id, data.x, data.y, data.label || null, data.description || null, data.gravite || 'Moyenne', data.created_by || null]);
+        this.logEvent({ acteur_type: data.created_by_role || 'MOD', action: 'Réserve sur plan ajoutée', cible_type: 'plan', cible_id: data.plan_doc_id, projet_id: data.projet_id, details: data.description || '' });
+        return res;
+    }
+    getPlanPins(planDocId) { return this.all('SELECT * FROM plan_pins WHERE plan_doc_id = ? ORDER BY id', [planDocId]); }
+    updatePlanPin(id, data) {
+        if (data.statut === 'Levé') { const today = new Date().toISOString().slice(0, 10); return this.run("UPDATE plan_pins SET statut = 'Levé', date_levee = ? WHERE id = ?", [today, id]); }
+        if (data.statut === 'Ouvert') return this.run("UPDATE plan_pins SET statut = 'Ouvert', date_levee = NULL WHERE id = ?", [id]);
+        return this.run('UPDATE plan_pins SET description = ?, gravite = ? WHERE id = ?', [data.description || null, data.gravite || 'Moyenne', id]);
+    }
+    deletePlanPin(id) { return this._deleteRow('plan_pins', id); }
+    getPlanPinStats(projetId) {
+        return {
+            total: this.getScalar('SELECT COUNT(*) FROM plan_pins WHERE projet_id = ?', [projetId]),
+            ouverts: this.getScalar("SELECT COUNT(*) FROM plan_pins WHERE projet_id = ? AND statut = 'Ouvert'", [projetId])
+        };
+    }
+
+    // ---- Signalements (espace exploitant / SAV) ----
+    createSignalement(data) {
+        const res = this.run(`INSERT INTO signalements (projet_id, lot_id, objet, description, localisation, gravite, statut, signale_par, date_signalement)
+            VALUES (?, ?, ?, ?, ?, ?, 'Ouvert', ?, ?)`,
+            [data.projet_id, data.lot_id || null, data.objet, data.description || null, data.localisation || null, data.gravite || 'Moyenne', data.signale_par || null, data.date_signalement || new Date().toISOString().slice(0, 10)]);
+        this.logEvent({ acteur_type: data.signale_par_role || 'MOD', action: 'Signalement créé', cible_type: 'signalement', cible_id: res.lastInsertRowid, projet_id: data.projet_id, details: data.objet });
+        this.createNotification({ destinataire_type: 'MOD', projet_id: data.projet_id, titre: 'Nouveau signalement', message: `${data.objet}${data.localisation ? ' — ' + data.localisation : ''}`, type_notif: 'alerte' });
+        return res;
+    }
+    getSignalementsByProjet(projetId) {
+        return this.all('SELECT s.*, l.code_lot FROM signalements s LEFT JOIN lots l ON s.lot_id = l.id WHERE s.projet_id = ? ORDER BY (s.statut = "Traité"), s.date_signalement DESC, s.id DESC', [projetId]);
+    }
+    updateSignalementStatut(id, statut) {
+        const done = statut === 'Traité' ? new Date().toISOString().slice(0, 10) : null;
+        this.run('UPDATE signalements SET statut = ?, date_traitement = ? WHERE id = ?', [statut, done, id]);
+        const s = this.get('SELECT * FROM signalements WHERE id = ?', [id]);
+        if (s) this.logEvent({ acteur_type: 'MOD', action: `Signalement ${statut}`, cible_type: 'signalement', cible_id: id, projet_id: s.projet_id, details: s.objet });
+        return { success: true };
+    }
+    deleteSignalement(id) { return this._deleteRow('signalements', id); }
+    getSignalementStats(projetId) {
+        return {
+            total: this.getScalar('SELECT COUNT(*) FROM signalements WHERE projet_id = ?', [projetId]),
+            ouverts: this.getScalar("SELECT COUNT(*) FROM signalements WHERE projet_id = ? AND statut != 'Traité'", [projetId])
+        };
+    }
+
+    // ---- Constats (état initial / diagnostic / réhabilitation) ----
+    createConstat(data) {
+        const res = this.run(`INSERT INTO constats (projet_id, lot_id, type, intitule, date_constat, etat_general, observations, created_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [data.projet_id, data.lot_id || null, data.type || 'Initial', data.intitule, data.date_constat || null, data.etat_general || null, data.observations || null, data.created_by || null]);
+        this.logEvent({ acteur_type: 'MOD', action: 'Constat établi', cible_type: 'constat', cible_id: res.lastInsertRowid, projet_id: data.projet_id, details: `${data.type || 'Initial'} — ${data.intitule}` });
+        return res;
+    }
+    getConstatsByProjet(projetId) {
+        return this.all(`SELECT c.*, l.code_lot,
+            (SELECT COUNT(*) FROM documents d WHERE d.entite_type = 'constat' AND d.entite_id = c.id) as nb_pieces
+            FROM constats c LEFT JOIN lots l ON c.lot_id = l.id WHERE c.projet_id = ? ORDER BY c.date_constat DESC, c.id DESC`, [projetId]);
+    }
+    deleteConstat(id) { return this._deleteRow('constats', id); }
+
+    // ---- Grilles de contrôle configurables ----
+    getChecklistItems(typeReception) {
+        if (typeReception) return this.all("SELECT * FROM checklist_items WHERE type_reception = ? AND actif = 1 ORDER BY ordre, id", [typeReception]);
+        return this.all('SELECT * FROM checklist_items ORDER BY type_reception, ordre, id');
+    }
+    addChecklistItem(data) {
+        const max = this.getScalar('SELECT COALESCE(MAX(ordre),0) FROM checklist_items WHERE type_reception = ?', [data.type_reception]);
+        return this.run('INSERT INTO checklist_items (type_reception, libelle, ordre, actif) VALUES (?, ?, ?, 1)', [data.type_reception, data.libelle, (max || 0) + 1]);
+    }
+    deleteChecklistItem(id) { return this._deleteRow('checklist_items', id); }
     getDocument(id) { return this.get('SELECT * FROM documents WHERE id = ?', [id]); }
     getDocumentsByEntity(entiteType, entiteId) {
         return this.all('SELECT * FROM documents WHERE entite_type = ? AND entite_id = ? ORDER BY created_at DESC', [entiteType, entiteId]);

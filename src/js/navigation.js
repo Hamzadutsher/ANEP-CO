@@ -22,6 +22,7 @@ const NAV_CONFIG = {
                 {
                     title: '', items: [
                         { id: 'hub-suivi', icon: 'clipboard-check', label: 'Suivi & contrôle' },
+                        { id: 'hub-terrain', icon: 'map-pinned', label: 'Réception & terrain' },
                         { id: 'hub-planning', icon: 'calendar-clock', label: 'Planning & délais' },
                         { id: 'hub-chantier', icon: 'calendar-days', label: 'Réunions & permanence' },
                         { id: 'documentation', icon: 'folder', label: 'Documentation & PV' }

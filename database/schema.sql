@@ -480,6 +480,65 @@ CREATE TABLE IF NOT EXISTS gpa_desordres (
     FOREIGN KEY (gpa_id) REFERENCES gpa(id) ON DELETE CASCADE
 );
 
+-- Réserves épinglées sur plan (OPR / réception sur plan)
+CREATE TABLE IF NOT EXISTS plan_pins (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    projet_id INTEGER NOT NULL,
+    plan_doc_id INTEGER NOT NULL,
+    x REAL NOT NULL,
+    y REAL NOT NULL,
+    label TEXT,
+    description TEXT,
+    gravite TEXT DEFAULT 'Moyenne',
+    statut TEXT DEFAULT 'Ouvert' CHECK(statut IN ('Ouvert', 'Levé')),
+    created_by TEXT,
+    date_levee DATE,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (projet_id) REFERENCES projets(id) ON DELETE CASCADE
+);
+
+-- Signalements de désordres (espace exploitant / SAV en phase d'exploitation)
+CREATE TABLE IF NOT EXISTS signalements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    projet_id INTEGER NOT NULL,
+    lot_id INTEGER,
+    objet TEXT NOT NULL,
+    description TEXT,
+    localisation TEXT,
+    gravite TEXT DEFAULT 'Moyenne',
+    statut TEXT DEFAULT 'Ouvert' CHECK(statut IN ('Ouvert', 'En cours', 'Traité')),
+    signale_par TEXT,
+    date_signalement DATE,
+    date_traitement DATE,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (projet_id) REFERENCES projets(id) ON DELETE CASCADE
+);
+
+-- Constats (état initial / diagnostic avant-travaux / réhabilitation)
+CREATE TABLE IF NOT EXISTS constats (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    projet_id INTEGER NOT NULL,
+    lot_id INTEGER,
+    type TEXT DEFAULT 'Initial' CHECK(type IN ('Initial', 'Réhabilitation', 'Contradictoire', 'Avant-travaux')),
+    intitule TEXT NOT NULL,
+    date_constat DATE,
+    etat_general TEXT,
+    observations TEXT,
+    created_by TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (projet_id) REFERENCES projets(id) ON DELETE CASCADE
+);
+
+-- Items de grilles de contrôle configurables (par type de réception)
+CREATE TABLE IF NOT EXISTS checklist_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    type_reception TEXT NOT NULL,
+    libelle TEXT NOT NULL,
+    ordre INTEGER DEFAULT 0,
+    actif INTEGER DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Journal météo (intempéries → arrêts/reprises dans les OS)
 CREATE TABLE IF NOT EXISTS meteo (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

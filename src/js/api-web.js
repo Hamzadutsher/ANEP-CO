@@ -129,6 +129,22 @@
             resolveDesordre: id => rpc('gpa:resolveDesordre', id), deleteDesordre: id => rpc('gpa:deleteDesordre', id)
         },
         budget: { get: id => rpc('budget:get', id) },
+        planpins: {
+            getByPlan: id => rpc('planpins:getByPlan', id), create: d => rpc('planpins:create', d),
+            update: (id, d) => rpc('planpins:update', id, d), delete: id => rpc('planpins:delete', id),
+            stats: id => rpc('planpins:stats', id)
+        },
+        signalements: {
+            getByProjet: id => rpc('signalements:getByProjet', id), create: d => rpc('signalements:create', d),
+            updateStatut: (id, s) => rpc('signalements:updateStatut', id, s), delete: id => rpc('signalements:delete', id),
+            stats: id => rpc('signalements:stats', id)
+        },
+        constats: {
+            getByProjet: id => rpc('constats:getByProjet', id), create: d => rpc('constats:create', d), delete: id => rpc('constats:delete', id)
+        },
+        checklist: {
+            get: t => rpc('checklist:get', t), add: d => rpc('checklist:add', d), delete: id => rpc('checklist:delete', id)
+        },
         essais: {
             getByOuvrage: id => rpc('essais:getByOuvrage', id), getEnCours: id => rpc('essais:getEnCours', id),
             create: d => rpc('essais:create', d), updateResultat: (id, d) => rpc('essais:updateResultat', id, d),

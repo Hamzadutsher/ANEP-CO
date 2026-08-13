@@ -110,6 +110,9 @@ async function renderPage(pageId, params = {}) {
             case 'hub-budget':
                 await renderBudgetHub(content);
                 break;
+            case 'hub-terrain':
+                await renderTerrainHub(content);
+                break;
             case 'documents':
                 await renderDocuments(content);
                 break;
@@ -1907,6 +1910,327 @@ async function generateDelaiAxisDoc() {
       </table>`;
     try { await window.api.docs.generate({ html, filename: 'axe_delai_projet_' + (axis.projetId || '') }); showToast('Généré', 'Axe de délai généré (imprimable / PDF).', 'success'); }
     catch (e) { showToast('Erreur', e.message, 'danger'); }
+}
+
+// ============================================================
+// RÉCEPTION & TERRAIN — réserves épinglées sur plan + signatures
+// ============================================================
+function renderTerrainHub(c) {
+    return renderTabHub(c, 'Réception & terrain', [
+        { pid: 'hub-plans', label: 'Plans & réserves', icon: 'map-pinned', render: renderPlansReserves },
+        { pid: 'hub-signal', label: 'Signalements', icon: 'megaphone', render: renderSignalements },
+        { pid: 'hub-constats', label: 'Constats', icon: 'clipboard-check', render: renderConstats },
+        { pid: 'hub-grilles', label: 'Grilles de contrôle', icon: 'list-checks', render: renderChecklistConfig }
+    ]);
+}
+
+async function renderPlansReserves(container) {
+    const isM = isMOD();
+    const projets = isM ? await window.api.projets.getAll() : [];
+    const projetId = isM ? (window._activeProjet || projets[0]?.id) : currentUser.projet_id;
+    if (!projetId) { container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">🗺️</div><h4>Aucun projet</h4></div>'; return; }
+    const plans = await window.api.photos.getGallery({ projetId, categorie: 'Plan' });
+    const stats = await window.api.planpins.stats(projetId);
+    window._plansCache = plans;
+    container.innerHTML = `
+        <div class="page-header animate-fade-in-up">
+            <div><h2>Plans & réserves</h2><p>Épinglez les réserves directement sur le plan · <strong>${stats.ouverts}</strong> ouverte(s) / ${stats.total}</p></div>
+            <button class="btn btn-primary" onclick="uploadPlan(${projetId})"><i data-lucide="upload"></i> Ajouter un plan</button>
+        </div>
+        ${isM ? `<div class="filter-bar animate-fade-in-up delay-1">
+            <select class="form-control" onchange="window._activeProjet=parseInt(this.value);renderPlansReserves(document.getElementById('hub-plans'))">
+                ${projets.map(p => `<option value="${p.id}" ${p.id === projetId ? 'selected' : ''}>${p.code_projet} — ${p.intitule}</option>`).join('')}
+            </select>
+        </div>` : ''}
+        ${plans.length ? `<div class="photo-grid animate-fade-in-up delay-2">
+            ${plans.map((pl, i) => `<div class="photo-card"><div class="photo-thumb" onclick="showPlanViewer(${i})">
+                ${pl.dataUrl ? `<img src="${pl.dataUrl}" alt="${pl.nom}" loading="lazy">` : '<div class="photo-missing">🗺️</div>'}
+                <span class="photo-cat"><span class="badge badge-primary">Plan</span></span>
+            </div><div class="photo-meta"><div class="text-xs font-medium truncate">${pl.nom}</div><div class="text-xs text-muted mt-sm">${formatDate(pl.created_at)} · cliquez pour épingler</div></div></div>`).join('')}
+        </div>` : '<div class="empty-state"><div class="empty-state-icon">🗺️</div><h4>Aucun plan</h4><p>Ajoutez un plan (image JPG/PNG) pour y épingler les réserves.</p></div>'}
+    `;
+    if (window.lucide) lucide.createIcons({ node: container });
+}
+async function uploadPlan(projetId) {
+    const acteur = currentUser.role === 'MOD' ? (currentUser.nom || 'MOD') : (currentUser.raison_sociale || currentUser.role);
+    try {
+        const res = await window.api.documents.upload({ photo: true, entite_type: 'plan', projet_id: projetId, categorie: 'Plan', uploaded_by: acteur, uploaded_by_role: currentUser.role });
+        if (res && res.canceled) return;
+        if (res && res.success) { showToast('Plan ajouté', 'Cliquez-le pour épingler des réserves.', 'success'); renderPlansReserves(document.getElementById('hub-plans')); }
+        else showToast('Erreur', (res && res.error) || 'Upload impossible.', 'danger');
+    } catch (e) { showToast('Erreur', e.message, 'danger'); }
+}
+async function showPlanViewer(index) {
+    const plan = (window._plansCache || [])[index];
+    if (!plan) return;
+    window._currentPlan = plan;
+    await renderPlanViewerBody(plan);
+}
+async function renderPlanViewerBody(plan) {
+    const pins = await window.api.planpins.getByPlan(plan.id);
+    const signatures = await window.api.photos.getGallery({ entiteType: 'plan', entiteId: plan.id, categorie: 'Signature' });
+    const pinHtml = pins.map(p => {
+        const color = p.statut === 'Levé' ? 'var(--success)' : (p.gravite === 'Élevée' ? 'var(--danger)' : 'var(--warning)');
+        return `<div title="${(p.description || '').replace(/"/g, '&quot;')}" onclick="event.stopPropagation();actPlanPin(${p.id})" style="position:absolute;left:${p.x}%;top:${p.y}%;transform:translate(-50%,-100%);cursor:pointer;z-index:2;">
+            <div style="width:20px;height:20px;border-radius:50% 50% 50% 0;background:${color};transform:rotate(-45deg);border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.4);"></div></div>`;
+    }).join('');
+    const body = `
+        <div class="d-flex justify-between align-center mb-sm flex-wrap gap-sm">
+            <div class="text-xs text-muted">Cliquez sur le plan pour ajouter une réserve · cliquez une épingle pour la lever/supprimer.</div>
+            <button class="btn btn-secondary btn-sm" onclick="showSignaturePad('plan', ${plan.id}, ${plan.projet_id || 'null'})"><i data-lucide="pen-tool"></i> Faire signer</button>
+        </div>
+        <div id="plan-canvas" onclick="addPlanPin(event, ${plan.id})" style="position:relative;display:inline-block;max-width:100%;cursor:crosshair;border:1px solid var(--border-color);border-radius:8px;overflow:hidden;line-height:0;">
+            <img src="${plan.dataUrl}" style="max-width:100%;display:block;pointer-events:none;">
+            ${pinHtml}
+        </div>
+        <div class="mt-md"><strong class="text-sm">Réserves (${pins.length})</strong>
+            ${pins.length ? `<div class="mt-sm">${pins.map(p => `<div class="d-flex justify-between align-center text-xs" style="padding:5px 0;border-bottom:1px solid var(--border-color);"><span>${p.statut === 'Levé' ? '✅' : '🔴'} ${p.description || '(sans description)'} <span class="text-muted">· ${p.gravite}${p.date_levee ? ' · levé ' + formatDate(p.date_levee) : ''}</span></span><button class="btn btn-ghost btn-sm" onclick="actPlanPin(${p.id})"><i data-lucide="settings-2"></i></button></div>`).join('')}</div>` : '<span class="text-muted text-xs"> — aucune</span>'}
+        </div>
+        ${signatures.length ? `<div class="mt-md"><strong class="text-sm">Signatures</strong><div class="d-flex gap-md flex-wrap mt-sm">${signatures.map(s => `<div class="text-center"><img src="${s.dataUrl}" style="height:56px;border:1px solid var(--border-color);border-radius:6px;background:#fff;"><div class="text-xs text-muted" style="max-width:120px;">${s.description || ''}</div></div>`).join('')}</div></div>` : ''}
+    `;
+    openModal('Plan — ' + plan.nom, body, '<button class="btn btn-ghost" onclick="closeModal()">Fermer</button>', 'lg');
+    if (window.lucide) lucide.createIcons();
+}
+async function addPlanPin(event, planDocId) {
+    const canvas = document.getElementById('plan-canvas');
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = Math.round(((event.clientX - rect.left) / rect.width) * 1000) / 10;
+    const y = Math.round(((event.clientY - rect.top) / rect.height) * 1000) / 10;
+    if (x < 0 || x > 100 || y < 0 || y > 100) return;
+    const description = prompt('Description de la réserve à cet emplacement :');
+    if (!description) return;
+    const acteur = currentUser.role === 'MOD' ? (currentUser.nom || 'MOD') : (currentUser.raison_sociale || currentUser.role);
+    await window.api.planpins.create({ projet_id: (window._currentPlan && window._currentPlan.projet_id) || null, plan_doc_id: planDocId, x, y, description, gravite: 'Moyenne', created_by: acteur, created_by_role: currentUser.role });
+    showToast('Réserve épinglée', '', 'success');
+    renderPlanViewerBody(window._currentPlan);
+}
+async function actPlanPin(id) {
+    if (confirm('Lever (marquer résolue) cette réserve ?\n\nOK = Lever · Annuler = autres options')) {
+        await window.api.planpins.update(id, { statut: 'Levé' });
+        renderPlanViewerBody(window._currentPlan); return;
+    }
+    if (confirm('Supprimer cette réserve ?')) {
+        await window.api.planpins.delete(id);
+        renderPlanViewerBody(window._currentPlan);
+    }
+}
+
+// ---- Pad de signature électronique (réutilisable : plan, CR, PV…) ----
+function showSignaturePad(entiteType, entiteId, projetId) {
+    const body = `
+        <div class="form-group"><label class="form-label required">Signataire</label><input type="text" class="form-control" id="sig-name" placeholder="Nom et qualité (ex : Entreprise TGCC — conducteur de travaux)"></div>
+        <div class="text-xs text-muted mb-sm">Signez dans le cadre ci-dessous :</div>
+        <canvas id="sig-canvas" width="520" height="180" style="border:1px dashed var(--border-color);border-radius:8px;background:#fff;touch-action:none;width:100%;max-width:520px;display:block;"></canvas>
+        <div class="mt-sm"><button class="btn btn-ghost btn-sm" onclick="clearSignature()"><i data-lucide="eraser"></i> Effacer</button></div>`;
+    openModal('Signature électronique', body, `<button class="btn btn-ghost" onclick="closeModal()">Annuler</button><button class="btn btn-primary" onclick="saveSignature('${entiteType}', ${entiteId}, ${projetId})">Enregistrer</button>`, 'lg');
+    setTimeout(initSignaturePad, 60);
+    if (window.lucide) lucide.createIcons();
+}
+function initSignaturePad() {
+    const c = document.getElementById('sig-canvas'); if (!c) return;
+    const ctx = c.getContext('2d'); ctx.lineWidth = 2.2; ctx.lineCap = 'round'; ctx.strokeStyle = '#12335f';
+    let drawing = false, last = null;
+    const pos = e => { const r = c.getBoundingClientRect(); const t = e.touches ? e.touches[0] : e; return { x: (t.clientX - r.left) * (c.width / r.width), y: (t.clientY - r.top) * (c.height / r.height) }; };
+    const start = e => { drawing = true; last = pos(e); c._ink = true; e.preventDefault(); };
+    const move = e => { if (!drawing) return; const p = pos(e); ctx.beginPath(); ctx.moveTo(last.x, last.y); ctx.lineTo(p.x, p.y); ctx.stroke(); last = p; e.preventDefault(); };
+    const end = () => { drawing = false; };
+    c.onmousedown = start; c.onmousemove = move; c.onmouseup = end; c.onmouseleave = end;
+    c.ontouchstart = start; c.ontouchmove = move; c.ontouchend = end;
+}
+function clearSignature() { const c = document.getElementById('sig-canvas'); if (c) { c.getContext('2d').clearRect(0, 0, c.width, c.height); c._ink = false; } }
+async function saveSignature(entiteType, entiteId, projetId) {
+    const c = document.getElementById('sig-canvas');
+    const name = (document.getElementById('sig-name') || {}).value || '';
+    if (!name.trim()) { showToast('Erreur', 'Indiquez le nom du signataire.', 'danger'); return; }
+    if (!c || !c._ink) { showToast('Erreur', 'Veuillez signer dans le cadre.', 'danger'); return; }
+    const dataUrl = c.toDataURL('image/png');
+    await window.api.documents.saveDataUrl(dataUrl, { entite_type: entiteType, entite_id: entiteId, projet_id: projetId, categorie: 'Signature', nom: 'Signature — ' + name, description: name, uploaded_by: (currentUser.nom || currentUser.raison_sociale || currentUser.role) });
+    closeModal();
+    showToast('Signé ✅', 'Signature enregistrée.', 'success');
+    if (window._currentPlan) renderPlanViewerBody(window._currentPlan);
+}
+
+// ---- Signalements (espace exploitant / SAV) ----
+async function _terrainProjet() {
+    const isM = isMOD();
+    const projets = isM ? await window.api.projets.getAll() : [];
+    const projetId = isM ? (window._activeProjet || projets[0]?.id) : currentUser.projet_id;
+    return { isM, projets, projetId };
+}
+function _gravBadge(g) { return `<span class="badge ${g === 'Élevée' ? 'badge-danger' : (g === 'Faible' ? 'badge-muted' : 'badge-warning')}">${g || 'Moyenne'}</span>`; }
+async function renderSignalements(container) {
+    const { isM, projets, projetId } = await _terrainProjet();
+    if (!projetId) { container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📣</div><h4>Aucun projet</h4></div>'; return; }
+    const list = await window.api.signalements.getByProjet(projetId);
+    const stBadge = s => `<span class="badge ${s === 'Traité' ? 'badge-success' : (s === 'En cours' ? 'badge-info' : 'badge-warning')}">${s}</span>`;
+    container.innerHTML = `
+        <div class="page-header animate-fade-in-up">
+            <div><h2>Signalements</h2><p>Désordres signalés par l'exploitant / l'administration utilisatrice (SAV)</p></div>
+            <button class="btn btn-primary" onclick="showNewSignalementModal(${projetId})"><i data-lucide="plus"></i> Nouveau signalement</button>
+        </div>
+        ${isM ? `<div class="filter-bar animate-fade-in-up delay-1"><select class="form-control" onchange="window._activeProjet=parseInt(this.value);renderSignalements(document.getElementById('hub-signal'))">
+            ${projets.map(p => `<option value="${p.id}" ${p.id === projetId ? 'selected' : ''}>${p.code_projet} — ${p.intitule}</option>`).join('')}
+        </select></div>` : ''}
+        <div class="card animate-fade-in-up delay-2"><div class="card-body">
+            ${list.length ? `<div class="table-wrapper"><table class="data-table">
+                <thead><tr><th>Objet</th><th>Localisation</th><th>Lot</th><th>Gravité</th><th>Signalé par</th><th>Date</th><th>Statut</th><th>Actions</th></tr></thead>
+                <tbody>${list.map(s => `<tr>
+                    <td class="font-medium text-sm">${s.objet}${s.description ? `<div class="text-xs text-muted">${s.description}</div>` : ''}</td>
+                    <td class="text-xs">${s.localisation || '—'}</td>
+                    <td class="text-xs">${s.code_lot ? `<span class="badge badge-info">${s.code_lot}</span>` : '—'}</td>
+                    <td>${_gravBadge(s.gravite)}</td>
+                    <td class="text-xs">${s.signale_par || '—'}</td>
+                    <td class="text-xs text-muted">${formatDate(s.date_signalement)}</td>
+                    <td>${stBadge(s.statut)}</td>
+                    <td class="actions">
+                        ${s.statut !== 'Traité' ? `<button class="btn btn-ghost btn-sm" title="Faire avancer" onclick="advanceSignalement(${s.id}, '${s.statut}')"><i data-lucide="arrow-right-circle"></i></button>` : ''}
+                        <button class="btn btn-ghost btn-sm" title="Pièce jointe" onclick="showEntityDocs('signalement', ${s.id}, ${projetId}, 'Signalement')"><i data-lucide="paperclip"></i></button>
+                        <button class="btn btn-ghost btn-sm" title="Supprimer" onclick="deleteSignalement(${s.id})"><i data-lucide="trash-2"></i></button>
+                    </td></tr>`).join('')}</tbody>
+            </table></div>` : '<div class="empty-state p-lg"><div class="empty-state-icon">📣</div><p class="text-muted">Aucun signalement.</p></div>'}
+        </div></div>`;
+    if (window.lucide) lucide.createIcons({ node: container });
+}
+async function showNewSignalementModal(projetId) {
+    const lots = await window.api.lots.getByProjet(projetId);
+    const body = `
+        <form id="form-signal">
+            <div class="form-group"><label class="form-label required">Objet</label><input type="text" class="form-control" name="objet" placeholder="Ex : infiltration, porte défectueuse…" required></div>
+            <div class="form-row">
+                <div class="form-group"><label class="form-label">Localisation</label><input type="text" class="form-control" name="localisation" placeholder="Bloc A, 2e étage…"></div>
+                <div class="form-group"><label class="form-label">Lot</label><select class="form-control" name="lot_id"><option value="">— Projet —</option>${lots.map(l => `<option value="${l.id}">${l.code_lot} — ${l.designation}</option>`).join('')}</select></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label class="form-label">Gravité</label><select class="form-control" name="gravite"><option>Faible</option><option selected>Moyenne</option><option>Élevée</option></select></div>
+                <div class="form-group"><label class="form-label">Signalé par</label><input type="text" class="form-control" name="signale_par" placeholder="Exploitant, gardien…"></div>
+            </div>
+            <div class="form-group"><label class="form-label">Description</label><textarea class="form-control" name="description" rows="2"></textarea></div>
+        </form>`;
+    openModal('Nouveau signalement', body, `<button class="btn btn-ghost" onclick="closeModal()">Annuler</button><button class="btn btn-primary" onclick="submitSignalement(${projetId})">Enregistrer</button>`, 'lg');
+}
+async function submitSignalement(projetId) {
+    const data = Object.fromEntries(new FormData(document.getElementById('form-signal')));
+    if (!data.objet) { showToast('Erreur', 'Objet requis.', 'danger'); return; }
+    data.projet_id = projetId; if (!data.lot_id) data.lot_id = null;
+    data.signale_par_role = currentUser.role;
+    try { await window.api.signalements.create(data); closeModal(); showToast('Signalement enregistré', 'Le MOD est notifié.', 'success'); renderSignalements(document.getElementById('hub-signal')); }
+    catch (err) { showToast('Erreur', err.message, 'danger'); }
+}
+async function advanceSignalement(id, statut) {
+    const next = statut === 'Ouvert' ? 'En cours' : 'Traité';
+    await window.api.signalements.updateStatut(id, next);
+    showToast('Mis à jour', 'Signalement : ' + next + '.', 'success');
+    renderSignalements(document.getElementById('hub-signal'));
+}
+async function deleteSignalement(id) {
+    if (!confirm('Supprimer ce signalement ?')) return;
+    await window.api.signalements.delete(id);
+    renderSignalements(document.getElementById('hub-signal'));
+}
+
+// ---- Constats (état initial / diagnostic / réhabilitation) ----
+async function renderConstats(container) {
+    const { isM, projets, projetId } = await _terrainProjet();
+    if (!projetId) { container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📋</div><h4>Aucun projet</h4></div>'; return; }
+    const list = await window.api.constats.getByProjet(projetId);
+    container.innerHTML = `
+        <div class="page-header animate-fade-in-up">
+            <div><h2>Constats</h2><p>État initial / diagnostic avant-travaux / réhabilitation — avec photos</p></div>
+            <button class="btn btn-primary" onclick="showNewConstatModal(${projetId})"><i data-lucide="plus"></i> Nouveau constat</button>
+        </div>
+        ${isM ? `<div class="filter-bar animate-fade-in-up delay-1"><select class="form-control" onchange="window._activeProjet=parseInt(this.value);renderConstats(document.getElementById('hub-constats'))">
+            ${projets.map(p => `<option value="${p.id}" ${p.id === projetId ? 'selected' : ''}>${p.code_projet} — ${p.intitule}</option>`).join('')}
+        </select></div>` : ''}
+        <div class="card animate-fade-in-up delay-2"><div class="card-body">
+            ${list.length ? `<div class="table-wrapper"><table class="data-table">
+                <thead><tr><th>Intitulé</th><th>Type</th><th>Lot</th><th>Date</th><th>État général</th><th>Photos</th><th>Actions</th></tr></thead>
+                <tbody>${list.map(c => `<tr>
+                    <td class="font-medium text-sm">${c.intitule}${c.observations ? `<div class="text-xs text-muted">${c.observations}</div>` : ''}</td>
+                    <td><span class="badge badge-info">${c.type}</span></td>
+                    <td class="text-xs">${c.code_lot ? `<span class="badge badge-info">${c.code_lot}</span>` : '—'}</td>
+                    <td class="text-xs text-muted">${formatDate(c.date_constat)}</td>
+                    <td class="text-xs">${c.etat_general || '—'}</td>
+                    <td class="text-xs">${c.nb_pieces > 0 ? `<span class="badge badge-success">${c.nb_pieces}</span>` : '—'}</td>
+                    <td class="actions">
+                        <button class="btn btn-ghost btn-sm" title="Photos / pièces" onclick="showEntityDocs('constat', ${c.id}, ${projetId}, 'Constat ${c.intitule.replace(/'/g, '’')}')"><i data-lucide="images"></i></button>
+                        <button class="btn btn-ghost btn-sm" title="Supprimer" onclick="deleteConstat(${c.id})"><i data-lucide="trash-2"></i></button>
+                    </td></tr>`).join('')}</tbody>
+            </table></div>` : '<div class="empty-state p-lg"><div class="empty-state-icon">📋</div><p class="text-muted">Aucun constat. Créez un état initial avant travaux.</p></div>'}
+        </div></div>`;
+    if (window.lucide) lucide.createIcons({ node: container });
+}
+async function showNewConstatModal(projetId) {
+    const lots = await window.api.lots.getByProjet(projetId);
+    const today = new Date().toISOString().split('T')[0];
+    const body = `
+        <form id="form-constat">
+            <div class="form-row">
+                <div class="form-group"><label class="form-label required">Intitulé</label><input type="text" class="form-control" name="intitule" placeholder="État initial Bloc A…" required></div>
+                <div class="form-group"><label class="form-label">Type</label><select class="form-control" name="type"><option>Initial</option><option>Avant-travaux</option><option>Réhabilitation</option><option>Contradictoire</option></select></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label class="form-label">Lot</label><select class="form-control" name="lot_id"><option value="">— Projet —</option>${lots.map(l => `<option value="${l.id}">${l.code_lot} — ${l.designation}</option>`).join('')}</select></div>
+                <div class="form-group"><label class="form-label">Date</label><input type="date" class="form-control" name="date_constat" value="${today}"></div>
+                <div class="form-group"><label class="form-label">État général</label><select class="form-control" name="etat_general"><option value="">—</option><option>Bon</option><option>Moyen</option><option>Dégradé</option><option>Vétuste</option></select></div>
+            </div>
+            <div class="form-group"><label class="form-label">Observations</label><textarea class="form-control" name="observations" rows="3"></textarea></div>
+            <p class="text-xs text-muted">Après création, ajoutez les photos via le bouton 🖼️.</p>
+        </form>`;
+    openModal('Nouveau constat', body, `<button class="btn btn-ghost" onclick="closeModal()">Annuler</button><button class="btn btn-primary" onclick="submitConstat(${projetId})">Enregistrer</button>`, 'lg');
+}
+async function submitConstat(projetId) {
+    const data = Object.fromEntries(new FormData(document.getElementById('form-constat')));
+    if (!data.intitule) { showToast('Erreur', 'Intitulé requis.', 'danger'); return; }
+    data.projet_id = projetId; if (!data.lot_id) data.lot_id = null;
+    data.created_by = currentUser.nom || currentUser.raison_sociale || currentUser.role;
+    try { await window.api.constats.create(data); closeModal(); showToast('Constat établi', 'Ajoutez les photos (bouton 🖼️).', 'success'); renderConstats(document.getElementById('hub-constats')); }
+    catch (err) { showToast('Erreur', err.message, 'danger'); }
+}
+async function deleteConstat(id) {
+    if (!confirm('Supprimer ce constat ?')) return;
+    await window.api.constats.delete(id);
+    renderConstats(document.getElementById('hub-constats'));
+}
+
+// ---- Grilles de contrôle configurables (items additionnels par type de réception) ----
+async function renderChecklistConfig(container) {
+    const types = Object.keys(CHECKLISTS);
+    const sel = window._checklistType || types[0];
+    window._checklistType = sel;
+    const base = CHECKLISTS[sel] || [];
+    const extra = await window.api.checklist.get(sel);
+    container.innerHTML = `
+        <div class="page-header animate-fade-in-up">
+            <div><h2>Grilles de contrôle</h2><p>Personnalisez les points de contrôle des réceptions (en plus des points standards)</p></div>
+        </div>
+        <div class="filter-bar animate-fade-in-up delay-1">
+            <select class="form-control" onchange="window._checklistType=this.value;renderChecklistConfig(document.getElementById('hub-grilles'))">
+                ${types.map(t => `<option value="${t}" ${t === sel ? 'selected' : ''}>${t}</option>`).join('')}
+            </select>
+        </div>
+        <div class="card animate-fade-in-up delay-2"><div class="card-body">
+            <strong class="text-sm">Points standards (non modifiables)</strong>
+            <div class="mt-sm mb-lg">${base.map(b => `<div class="text-xs text-muted" style="padding:4px 0;">• ${b}</div>`).join('')}</div>
+            <strong class="text-sm">Points additionnels configurés</strong>
+            <div class="mt-sm mb-md">${extra.length ? extra.map(e => `<div class="d-flex justify-between align-center text-sm" style="padding:5px 0;border-bottom:1px solid var(--border-color);"><span>➕ ${e.libelle}</span><button class="btn btn-ghost btn-sm" onclick="deleteChecklistItem(${e.id})"><i data-lucide="trash-2"></i></button></div>`).join('') : '<span class="text-muted text-xs">Aucun point additionnel.</span>'}</div>
+            <form id="form-checkitem" class="d-flex gap-sm align-end" onsubmit="return false;">
+                <div class="form-group flex-1" style="margin:0;"><label class="form-label">Nouveau point de contrôle</label><input type="text" class="form-control" id="checkitem-lib" placeholder="Ex : vérifier l'étanchéité des joints"></div>
+                <button class="btn btn-primary" onclick="addChecklistItem()"><i data-lucide="plus"></i> Ajouter</button>
+            </form>
+        </div></div>`;
+    if (window.lucide) lucide.createIcons({ node: container });
+}
+async function addChecklistItem() {
+    const lib = (document.getElementById('checkitem-lib') || {}).value || '';
+    if (!lib.trim()) { showToast('Erreur', 'Libellé requis.', 'danger'); return; }
+    await window.api.checklist.add({ type_reception: window._checklistType, libelle: lib.trim() });
+    showToast('Ajouté', 'Point de contrôle ajouté.', 'success');
+    renderChecklistConfig(document.getElementById('hub-grilles'));
+}
+async function deleteChecklistItem(id) {
+    await window.api.checklist.delete(id);
+    renderChecklistConfig(document.getElementById('hub-grilles'));
 }
 
 // ============================================================
@@ -4517,9 +4841,10 @@ const CHECKLISTS = {
     'Contrôle BCT': ['Conformité réglementaire', 'Sécurité et stabilité de l\'ouvrage', 'Validation des produits/matériaux proposés', 'Cohérence avec l\'avis du BET']
 };
 
-function showSubmitAvisModal(etapeId, typeEtape, ouvrageId, withReserves = false) {
-    const checklist = CHECKLISTS[typeEtape];
-    const checklistHtml = checklist ? `
+async function showSubmitAvisModal(etapeId, typeEtape, ouvrageId, withReserves = false) {
+    let checklist = CHECKLISTS[typeEtape] ? [...CHECKLISTS[typeEtape]] : [];
+    try { const extra = await window.api.checklist.get(typeEtape); if (extra && extra.length) checklist = checklist.concat(extra.map(e => e.libelle)); } catch (e) {}
+    const checklistHtml = checklist.length ? `
         <div class="form-group">
             <label class="form-label">Grille de vérification</label>
             <div class="checklist">

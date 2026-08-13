@@ -129,6 +129,30 @@ contextBridge.exposeInMainWorld('api', {
     budget: {
         get: (projetId) => ipcRenderer.invoke('budget:get', projetId)
     },
+    planpins: {
+        getByPlan: (planDocId) => ipcRenderer.invoke('planpins:getByPlan', planDocId),
+        create: (data) => ipcRenderer.invoke('planpins:create', data),
+        update: (id, data) => ipcRenderer.invoke('planpins:update', id, data),
+        delete: (id) => ipcRenderer.invoke('planpins:delete', id),
+        stats: (projetId) => ipcRenderer.invoke('planpins:stats', projetId)
+    },
+    signalements: {
+        getByProjet: (projetId) => ipcRenderer.invoke('signalements:getByProjet', projetId),
+        create: (data) => ipcRenderer.invoke('signalements:create', data),
+        updateStatut: (id, statut) => ipcRenderer.invoke('signalements:updateStatut', id, statut),
+        delete: (id) => ipcRenderer.invoke('signalements:delete', id),
+        stats: (projetId) => ipcRenderer.invoke('signalements:stats', projetId)
+    },
+    constats: {
+        getByProjet: (projetId) => ipcRenderer.invoke('constats:getByProjet', projetId),
+        create: (data) => ipcRenderer.invoke('constats:create', data),
+        delete: (id) => ipcRenderer.invoke('constats:delete', id)
+    },
+    checklist: {
+        get: (typeReception) => ipcRenderer.invoke('checklist:get', typeReception),
+        add: (data) => ipcRenderer.invoke('checklist:add', data),
+        delete: (id) => ipcRenderer.invoke('checklist:delete', id)
+    },
 
     // Essais Labo
     essais: {
