@@ -118,6 +118,17 @@
             create: d => rpc('os:create', d), update: (id, d) => rpc('os:update', id, d), delete: id => rpc('os:delete', id)
         },
         timeline: { axis: id => rpc('timeline:axis', id) },
+        avenants: {
+            getByProjet: id => rpc('avenants:getByProjet', id), create: d => rpc('avenants:create', d),
+            updateStatut: (id, s) => rpc('avenants:updateStatut', id, s), delete: id => rpc('avenants:delete', id)
+        },
+        gpa: {
+            getByProjet: id => rpc('gpa:getByProjet', id), create: d => rpc('gpa:create', d),
+            close: id => rpc('gpa:close', id), delete: id => rpc('gpa:delete', id),
+            addDesordre: d => rpc('gpa:addDesordre', d), getDesordres: id => rpc('gpa:getDesordres', id),
+            resolveDesordre: id => rpc('gpa:resolveDesordre', id), deleteDesordre: id => rpc('gpa:deleteDesordre', id)
+        },
+        budget: { get: id => rpc('budget:get', id) },
         essais: {
             getByOuvrage: id => rpc('essais:getByOuvrage', id), getEnCours: id => rpc('essais:getEnCours', id),
             create: d => rpc('essais:create', d), updateResultat: (id, d) => rpc('essais:updateResultat', id, d),

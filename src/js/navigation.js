@@ -34,6 +34,7 @@ const NAV_CONFIG = {
                 {
                     title: '', items: [
                         { id: 'paiements', icon: 'banknote', label: 'Décomptes & Paiements' },
+                        { id: 'hub-budget', icon: 'trending-up', label: 'Budget, avenants & GPA' },
                         { id: 'hub-admin', icon: 'sliders-horizontal', label: 'Paramètres & sauvegarde' }
                     ]
                 }

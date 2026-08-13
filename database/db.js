@@ -1422,6 +1422,92 @@ class AppDatabase {
         };
     }
 
+    // ============================================================
+    // AVENANTS — modifications de marché (montant / délai)
+    // ============================================================
+    createAvenant(data) {
+        const res = this.run(`INSERT INTO avenants (projet_id, lot_id, numero, objet, montant_avenant, delai_jours, date_avenant, motif, statut)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [data.projet_id, data.lot_id || null, data.numero, data.objet, parseFloat(data.montant_avenant) || 0, parseInt(data.delai_jours) || 0, data.date_avenant || null, data.motif || null, data.statut || 'Proposé']);
+        this.logEvent({ acteur_type: 'MOD', action: 'Avenant établi', cible_type: 'avenant', cible_id: res.lastInsertRowid, projet_id: data.projet_id, details: `${data.numero} — ${Math.round(parseFloat(data.montant_avenant) || 0)} DH / ${parseInt(data.delai_jours) || 0} j` });
+        return res;
+    }
+    getAvenantsByProjet(projetId) {
+        return this.all(`SELECT a.*, l.code_lot FROM avenants a LEFT JOIN lots l ON a.lot_id = l.id WHERE a.projet_id = ? ORDER BY a.date_avenant DESC, a.id DESC`, [projetId]);
+    }
+    updateAvenantStatut(id, statut) {
+        this.run('UPDATE avenants SET statut = ? WHERE id = ?', [statut, id]);
+        const a = this.get('SELECT * FROM avenants WHERE id = ?', [id]);
+        if (a) this.logEvent({ acteur_type: 'MOD', action: `Avenant ${statut}`, cible_type: 'avenant', cible_id: id, projet_id: a.projet_id, details: a.numero });
+        return { success: true };
+    }
+    deleteAvenant(id) { return this._deleteRow('avenants', id); }
+
+    // ============================================================
+    // GPA — Garantie de Parfait Achèvement (12 mois après réception)
+    // ============================================================
+    createGpa(data) {
+        let fin = data.date_fin_gpa;
+        if (!fin && data.date_reception) { const d = new Date(String(data.date_reception).slice(0, 10) + 'T00:00:00Z'); d.setUTCFullYear(d.getUTCFullYear() + 1); fin = d.toISOString().slice(0, 10); }
+        const res = this.run(`INSERT INTO gpa (projet_id, lot_id, date_reception, date_fin_gpa, montant_retenue, statut, observations)
+            VALUES (?, ?, ?, ?, ?, 'En cours', ?)`,
+            [data.projet_id, data.lot_id || null, data.date_reception, fin || null, parseFloat(data.montant_retenue) || 0, data.observations || null]);
+        this.logEvent({ acteur_type: 'MOD', action: 'GPA ouverte', cible_type: 'gpa', cible_id: res.lastInsertRowid, projet_id: data.projet_id, details: `réception ${data.date_reception} → fin ${fin || '?'}` });
+        return res;
+    }
+    getGpaByProjet(projetId) {
+        return this.all(`SELECT g.*, l.code_lot,
+            (SELECT COUNT(*) FROM gpa_desordres d WHERE d.gpa_id = g.id) as nb_desordres,
+            (SELECT COUNT(*) FROM gpa_desordres d WHERE d.gpa_id = g.id AND d.statut = 'Ouvert') as nb_ouverts
+            FROM gpa g LEFT JOIN lots l ON g.lot_id = l.id WHERE g.projet_id = ? ORDER BY g.date_reception DESC, g.id DESC`, [projetId]);
+    }
+    closeGpa(id) {
+        const ouverts = this.getScalar("SELECT COUNT(*) FROM gpa_desordres WHERE gpa_id = ? AND statut = 'Ouvert'", [id]);
+        if (ouverts > 0) return { success: false, error: `${ouverts} désordre(s) encore ouvert(s) — à résoudre avant clôture.` };
+        this.run("UPDATE gpa SET statut = 'Clôturée' WHERE id = ?", [id]);
+        const g = this.get('SELECT * FROM gpa WHERE id = ?', [id]);
+        if (g) this.logEvent({ acteur_type: 'MOD', action: 'GPA clôturée (retenue libérable)', cible_type: 'gpa', cible_id: id, projet_id: g.projet_id, details: '' });
+        return { success: true };
+    }
+    deleteGpa(id) { this.run('DELETE FROM gpa_desordres WHERE gpa_id = ?', [id]); return this._deleteRow('gpa', id); }
+    addGpaDesordre(data) {
+        const res = this.run(`INSERT INTO gpa_desordres (gpa_id, description, gravite, date_signalement, signale_par, statut)
+            VALUES (?, ?, ?, ?, ?, 'Ouvert')`,
+            [data.gpa_id, data.description, data.gravite || 'Moyenne', data.date_signalement || null, data.signale_par || null]);
+        return res;
+    }
+    getGpaDesordres(gpaId) { return this.all('SELECT * FROM gpa_desordres WHERE gpa_id = ? ORDER BY statut, date_signalement DESC, id DESC', [gpaId]); }
+    resolveGpaDesordre(id) {
+        const today = new Date().toISOString().slice(0, 10);
+        return this.run("UPDATE gpa_desordres SET statut = 'Résolu', date_resolution = ? WHERE id = ?", [today, id]);
+    }
+    deleteGpaDesordre(id) { return this._deleteRow('gpa_desordres', id); }
+
+    // ============================================================
+    // BUDGET — marché initial + avenants vs engagé/payé (maîtrise des dérives)
+    // ============================================================
+    getProjetBudget(projetId) {
+        const projet = this.get('SELECT montant_marche FROM projets WHERE id = ?', [projetId]);
+        const marcheInitial = (projet && projet.montant_marche) || 0;
+        const avenantsApprouves = this.getScalar("SELECT COALESCE(SUM(montant_avenant),0) FROM avenants WHERE projet_id = ? AND statut = 'Approuvé'", [projetId]);
+        const avenantsDelai = this.getScalar("SELECT COALESCE(SUM(delai_jours),0) FROM avenants WHERE projet_id = ? AND statut = 'Approuvé'", [projetId]);
+        const nbAvenants = this.getScalar('SELECT COUNT(*) FROM avenants WHERE projet_id = ?', [projetId]);
+        const marcheRevise = marcheInitial + avenantsApprouves;
+        const montantTTC = this.getScalar('SELECT COALESCE(SUM(montant_ttc),0) FROM decomptes WHERE projet_id = ?', [projetId]);
+        const engage = this.getScalar("SELECT COALESCE(SUM(montant_net_a_payer),0) FROM decomptes WHERE projet_id = ? AND statut NOT IN ('Rejeté')", [projetId]);
+        const mandate = this.getScalar("SELECT COALESCE(SUM(montant_net_a_payer),0) FROM decomptes WHERE projet_id = ? AND statut IN ('Mandaté','Payé')", [projetId]);
+        const paye = this.getScalar("SELECT COALESCE(SUM(montant_net_a_payer),0) FROM decomptes WHERE projet_id = ? AND statut = 'Payé'", [projetId]);
+        const resteAPayer = Math.max(0, marcheRevise - paye);
+        const pctPaye = marcheRevise > 0 ? Math.round(paye / marcheRevise * 100) : 0;
+        const pctEngage = marcheRevise > 0 ? Math.round(engage / marcheRevise * 100) : 0;
+        return {
+            marcheInitial, avenantsApprouves, avenantsDelai, nbAvenants, marcheRevise,
+            engage, mandate, paye, resteAPayer, pctPaye, pctEngage, montantTTC,
+            depassement: engage > marcheRevise && marcheRevise > 0,
+            depassementMontant: engage > marcheRevise ? engage - marcheRevise : 0
+        };
+    }
+
     close() {
         if (this.db) {
             this.save();

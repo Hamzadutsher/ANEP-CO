@@ -436,6 +436,50 @@ CREATE TABLE IF NOT EXISTS lot_interfaces (
     FOREIGN KEY (lot_cible_id) REFERENCES lots(id)
 );
 
+-- Avenants (modifications de marché : montant et/ou délai)
+CREATE TABLE IF NOT EXISTS avenants (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    projet_id INTEGER NOT NULL,
+    lot_id INTEGER,
+    numero TEXT NOT NULL,
+    objet TEXT NOT NULL,
+    montant_avenant REAL DEFAULT 0,
+    delai_jours INTEGER DEFAULT 0,
+    date_avenant DATE,
+    motif TEXT,
+    statut TEXT DEFAULT 'Proposé' CHECK(statut IN ('Proposé', 'Approuvé', 'Rejeté')),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (projet_id) REFERENCES projets(id) ON DELETE CASCADE
+);
+
+-- GPA (Garantie de Parfait Achèvement) — 12 mois après réception
+CREATE TABLE IF NOT EXISTS gpa (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    projet_id INTEGER NOT NULL,
+    lot_id INTEGER,
+    date_reception DATE NOT NULL,
+    date_fin_gpa DATE,
+    montant_retenue REAL DEFAULT 0,
+    statut TEXT DEFAULT 'En cours' CHECK(statut IN ('En cours', 'Clôturée')),
+    observations TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (projet_id) REFERENCES projets(id) ON DELETE CASCADE
+);
+
+-- Désordres signalés pendant la GPA
+CREATE TABLE IF NOT EXISTS gpa_desordres (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    gpa_id INTEGER NOT NULL,
+    description TEXT NOT NULL,
+    gravite TEXT DEFAULT 'Moyenne',
+    date_signalement DATE,
+    signale_par TEXT,
+    statut TEXT DEFAULT 'Ouvert' CHECK(statut IN ('Ouvert', 'Résolu')),
+    date_resolution DATE,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (gpa_id) REFERENCES gpa(id) ON DELETE CASCADE
+);
+
 -- Journal météo (intempéries → arrêts/reprises dans les OS)
 CREATE TABLE IF NOT EXISTS meteo (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

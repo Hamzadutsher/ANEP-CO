@@ -110,6 +110,25 @@ contextBridge.exposeInMainWorld('api', {
     timeline: {
         axis: (projetId) => ipcRenderer.invoke('timeline:axis', projetId)
     },
+    avenants: {
+        getByProjet: (projetId) => ipcRenderer.invoke('avenants:getByProjet', projetId),
+        create: (data) => ipcRenderer.invoke('avenants:create', data),
+        updateStatut: (id, statut) => ipcRenderer.invoke('avenants:updateStatut', id, statut),
+        delete: (id) => ipcRenderer.invoke('avenants:delete', id)
+    },
+    gpa: {
+        getByProjet: (projetId) => ipcRenderer.invoke('gpa:getByProjet', projetId),
+        create: (data) => ipcRenderer.invoke('gpa:create', data),
+        close: (id) => ipcRenderer.invoke('gpa:close', id),
+        delete: (id) => ipcRenderer.invoke('gpa:delete', id),
+        addDesordre: (data) => ipcRenderer.invoke('gpa:addDesordre', data),
+        getDesordres: (gpaId) => ipcRenderer.invoke('gpa:getDesordres', gpaId),
+        resolveDesordre: (id) => ipcRenderer.invoke('gpa:resolveDesordre', id),
+        deleteDesordre: (id) => ipcRenderer.invoke('gpa:deleteDesordre', id)
+    },
+    budget: {
+        get: (projetId) => ipcRenderer.invoke('budget:get', projetId)
+    },
 
     // Essais Labo
     essais: {

@@ -206,6 +206,19 @@ function setupIPC() {
     ipcMain.handle('os:getByProjet', (event, projetId) => db.getOSByProjet(projetId));
     ipcMain.handle('os:getDependentLots', (event, lotId) => db.getDependentLots(lotId));
     ipcMain.handle('timeline:axis', (event, projetId) => db.getDelaiAxis(projetId));
+    ipcMain.handle('avenants:getByProjet', (event, projetId) => db.getAvenantsByProjet(projetId));
+    ipcMain.handle('avenants:create', (event, data) => db.createAvenant(data));
+    ipcMain.handle('avenants:updateStatut', (event, id, statut) => db.updateAvenantStatut(id, statut));
+    ipcMain.handle('avenants:delete', (event, id) => db.deleteAvenant(id));
+    ipcMain.handle('gpa:getByProjet', (event, projetId) => db.getGpaByProjet(projetId));
+    ipcMain.handle('gpa:create', (event, data) => db.createGpa(data));
+    ipcMain.handle('gpa:close', (event, id) => db.closeGpa(id));
+    ipcMain.handle('gpa:delete', (event, id) => db.deleteGpa(id));
+    ipcMain.handle('gpa:addDesordre', (event, data) => db.addGpaDesordre(data));
+    ipcMain.handle('gpa:getDesordres', (event, gpaId) => db.getGpaDesordres(gpaId));
+    ipcMain.handle('gpa:resolveDesordre', (event, id) => db.resolveGpaDesordre(id));
+    ipcMain.handle('gpa:deleteDesordre', (event, id) => db.deleteGpaDesordre(id));
+    ipcMain.handle('budget:get', (event, projetId) => db.getProjetBudget(projetId));
     ipcMain.handle('os:create', (event, data) => db.createOS(data));
 
     // ---- Essais Labo ----

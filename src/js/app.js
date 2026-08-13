@@ -107,6 +107,9 @@ async function renderPage(pageId, params = {}) {
             case 'hub-admin':
                 await renderAdminHub(content);
                 break;
+            case 'hub-budget':
+                await renderBudgetHub(content);
+                break;
             case 'documents':
                 await renderDocuments(content);
                 break;
@@ -1904,6 +1907,253 @@ async function generateDelaiAxisDoc() {
       </table>`;
     try { await window.api.docs.generate({ html, filename: 'axe_delai_projet_' + (axis.projetId || '') }); showToast('Généré', 'Axe de délai généré (imprimable / PDF).', 'success'); }
     catch (e) { showToast('Erreur', e.message, 'danger'); }
+}
+
+// ============================================================
+// BUDGET · AVENANTS · GPA (maîtrise budgétaire + garantie)
+// ============================================================
+function renderBudgetHub(c) {
+    return renderTabHub(c, 'Budget, avenants & GPA', [
+        { pid: 'hub-bud', label: 'Budget', icon: 'trending-up', render: renderBudgetTab },
+        { pid: 'hub-ave', label: 'Avenants', icon: 'file-diff', render: renderAvenants },
+        { pid: 'hub-gpa', label: 'GPA (garantie)', icon: 'shield-check', render: renderGpa }
+    ]);
+}
+async function _budgetProjetSelector() {
+    const projets = await window.api.projets.getAll();
+    const projetId = window._budgetProjet || window._activeProjet || projets[0]?.id;
+    window._budgetProjet = projetId;
+    return { projets, projetId };
+}
+function avenantStatutBadge(s) {
+    const map = { 'Proposé': 'badge-warning', 'Approuvé': 'badge-success', 'Rejeté': 'badge-danger' };
+    return `<span class="badge ${map[s] || 'badge-muted'}">${s}</span>`;
+}
+
+async function renderBudgetTab(container) {
+    const { projets, projetId } = await _budgetProjetSelector();
+    if (!projetId) { container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">💰</div><h4>Aucun projet</h4></div>'; return; }
+    const b = await window.api.budget.get(projetId);
+    const pctPaye = Math.min(100, b.pctPaye), pctEngage = Math.min(100, b.pctEngage);
+    container.innerHTML = `
+        <div class="filter-bar animate-fade-in-up">
+            <select class="form-control" onchange="window._budgetProjet=parseInt(this.value);renderBudgetTab(document.getElementById('hub-bud'))">
+                ${projets.map(p => `<option value="${p.id}" ${p.id === projetId ? 'selected' : ''}>${p.code_projet} — ${p.intitule}</option>`).join('')}
+            </select>
+        </div>
+        ${b.depassement ? `<div class="card card-flat mb-lg animate-fade-in-up" style="border-left:4px solid var(--danger);"><div class="card-body"><strong class="text-danger">⚠ Dépassement du marché révisé de ${formatCurrency(b.depassementMontant)}</strong> <span class="text-sm text-muted">— l'engagé dépasse le marché + avenants approuvés.</span></div></div>` : ''}
+        <div class="stats-grid animate-fade-in-up delay-1">
+            <div class="stat-card stat-primary"><div class="stat-icon icon-primary"><i data-lucide="wallet"></i></div><div class="stat-content"><div class="stat-value text-md">${formatCurrency(b.marcheInitial)}</div><div class="stat-label">Marché initial</div></div></div>
+            <div class="stat-card stat-info"><div class="stat-icon icon-info"><i data-lucide="file-diff"></i></div><div class="stat-content"><div class="stat-value text-md">${b.avenantsApprouves >= 0 ? '+' : ''}${formatCurrency(b.avenantsApprouves)}</div><div class="stat-label">Avenants approuvés${b.avenantsDelai ? ` (+${b.avenantsDelai} j)` : ''}</div></div></div>
+            <div class="stat-card stat-secondary"><div class="stat-icon icon-secondary"><i data-lucide="equal"></i></div><div class="stat-content"><div class="stat-value text-md">${formatCurrency(b.marcheRevise)}</div><div class="stat-label">Marché révisé</div></div></div>
+            <div class="stat-card ${b.depassement ? 'stat-danger' : 'stat-success'}"><div class="stat-icon"><i data-lucide="banknote"></i></div><div class="stat-content"><div class="stat-value text-md">${formatCurrency(b.paye)}</div><div class="stat-label">Payé</div></div></div>
+        </div>
+        <div class="card mt-lg animate-fade-in-up delay-2"><div class="card-body">
+            <div class="d-flex justify-between text-sm mb-sm"><span class="text-muted">Engagé (décomptes non rejetés)</span><span class="font-medium">${formatCurrency(b.engage)} · ${pctEngage}%</span></div>
+            <div style="height:10px;background:var(--bg-tertiary);border-radius:5px;overflow:hidden;"><div style="height:100%;width:${pctEngage}%;background:${b.depassement ? 'var(--danger)' : 'var(--warning)'};"></div></div>
+            <div class="d-flex justify-between text-sm mt-md mb-sm"><span class="text-muted">Payé</span><span class="font-medium">${formatCurrency(b.paye)} · ${pctPaye}%</span></div>
+            <div style="height:10px;background:var(--bg-tertiary);border-radius:5px;overflow:hidden;"><div style="height:100%;width:${pctPaye}%;background:var(--success);"></div></div>
+            <div class="d-flex justify-between mt-md" style="border-top:1px solid var(--border-color);padding-top:10px;"><span class="font-semibold">Reste à payer</span><span class="font-bold text-info">${formatCurrency(b.resteAPayer)}</span></div>
+            <div class="d-flex justify-between mt-sm text-xs text-muted"><span>Mandaté : ${formatCurrency(b.mandate)}</span><span>${b.nbAvenants} avenant(s)</span></div>
+        </div></div>
+    `;
+    if (window.lucide) lucide.createIcons({ node: container });
+}
+
+async function renderAvenants(container) {
+    const { projets, projetId } = await _budgetProjetSelector();
+    if (!projetId) { container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📝</div><h4>Aucun projet</h4></div>'; return; }
+    const avenants = await window.api.avenants.getByProjet(projetId);
+    window._avenantsList = avenants;
+    container.innerHTML = `
+        <div class="page-header animate-fade-in-up">
+            <div><h2>Avenants au marché</h2><p>Modifications du marché (montant et/ou délai) — impactent le budget révisé</p></div>
+            <button class="btn btn-primary" onclick="showNewAvenantModal(${projetId})"><i data-lucide="plus"></i> Nouvel avenant</button>
+        </div>
+        <div class="filter-bar animate-fade-in-up delay-1">
+            <select class="form-control" onchange="window._budgetProjet=parseInt(this.value);renderAvenants(document.getElementById('hub-ave'))">
+                ${projets.map(p => `<option value="${p.id}" ${p.id === projetId ? 'selected' : ''}>${p.code_projet} — ${p.intitule}</option>`).join('')}
+            </select>
+        </div>
+        <div class="card animate-fade-in-up delay-2"><div class="card-body">
+            ${avenants.length ? `<div class="table-wrapper"><table class="data-table">
+                <thead><tr><th>N°</th><th>Objet</th><th>Lot</th><th>Montant</th><th>Délai</th><th>Date</th><th>Statut</th><th>Actions</th></tr></thead>
+                <tbody>${avenants.map(a => `<tr>
+                    <td class="font-medium">${a.numero}</td>
+                    <td class="text-sm">${a.objet}</td>
+                    <td class="text-xs">${a.code_lot ? `<span class="badge badge-info">${a.code_lot}</span>` : '<span class="text-muted">Projet</span>'}</td>
+                    <td class="font-medium ${a.montant_avenant < 0 ? 'text-danger' : ''}">${a.montant_avenant >= 0 ? '+' : ''}${formatCurrency(a.montant_avenant)}</td>
+                    <td class="text-xs">${a.delai_jours ? (a.delai_jours > 0 ? '+' : '') + a.delai_jours + ' j' : '—'}</td>
+                    <td class="text-xs text-muted">${formatDate(a.date_avenant)}</td>
+                    <td>${avenantStatutBadge(a.statut)}</td>
+                    <td class="actions">
+                        ${a.statut === 'Proposé' ? `<button class="btn btn-ghost btn-sm" title="Approuver" onclick="setAvenantStatut(${a.id},'Approuvé')"><i data-lucide="check"></i></button>
+                        <button class="btn btn-ghost btn-sm" title="Rejeter" onclick="setAvenantStatut(${a.id},'Rejeté')"><i data-lucide="x"></i></button>` : ''}
+                        <button class="btn btn-ghost btn-sm" title="Pièce jointe" onclick="showEntityDocs('avenant', ${a.id}, ${projetId}, 'Avenant ${a.numero}')"><i data-lucide="paperclip"></i></button>
+                        <button class="btn btn-ghost btn-sm" title="Supprimer" onclick="deleteAvenant(${a.id})"><i data-lucide="trash-2"></i></button>
+                    </td></tr>`).join('')}</tbody>
+            </table></div>` : '<div class="empty-state p-lg"><div class="empty-state-icon">📝</div><p class="text-muted">Aucun avenant. Créez-en un pour modifier le marché (montant/délai).</p></div>'}
+        </div></div>
+    `;
+    if (window.lucide) lucide.createIcons({ node: container });
+}
+async function showNewAvenantModal(projetId) {
+    const lots = await window.api.lots.getByProjet(projetId);
+    const today = new Date().toISOString().split('T')[0];
+    const body = `
+        <form id="form-avenant">
+            <div class="form-row">
+                <div class="form-group"><label class="form-label required">N° avenant</label><input type="text" class="form-control" name="numero" placeholder="AV-01" required></div>
+                <div class="form-group"><label class="form-label">Lot (optionnel)</label><select class="form-control" name="lot_id"><option value="">— Tout le projet —</option>${lots.map(l => `<option value="${l.id}">${l.code_lot} — ${l.designation}</option>`).join('')}</select></div>
+            </div>
+            <div class="form-group"><label class="form-label required">Objet</label><input type="text" class="form-control" name="objet" placeholder="Travaux supplémentaires…" required></div>
+            <div class="form-row">
+                <div class="form-group"><label class="form-label">Montant (DH, négatif = moins-value)</label><input type="number" step="0.01" class="form-control" name="montant_avenant" value="0"></div>
+                <div class="form-group"><label class="form-label">Délai (jours, +/-)</label><input type="number" class="form-control" name="delai_jours" value="0"></div>
+                <div class="form-group"><label class="form-label">Date</label><input type="date" class="form-control" name="date_avenant" value="${today}"></div>
+            </div>
+            <div class="form-group"><label class="form-label">Motif</label><textarea class="form-control" name="motif" rows="2"></textarea></div>
+        </form>`;
+    openModal('Nouvel avenant', body, `<button class="btn btn-ghost" onclick="closeModal()">Annuler</button><button class="btn btn-primary" onclick="submitAvenant(${projetId})">Enregistrer</button>`, 'lg');
+}
+async function submitAvenant(projetId) {
+    const data = Object.fromEntries(new FormData(document.getElementById('form-avenant')));
+    if (!data.numero || !data.objet) { showToast('Erreur', 'N° et objet requis.', 'danger'); return; }
+    data.projet_id = projetId;
+    if (!data.lot_id) data.lot_id = null;
+    try { await window.api.avenants.create(data); closeModal(); showToast('Avenant établi', 'À approuver pour impacter le budget révisé.', 'success'); renderAvenants(document.getElementById('hub-ave')); }
+    catch (err) { showToast('Erreur', err.message, 'danger'); }
+}
+async function setAvenantStatut(id, statut) {
+    if (!confirm(`${statut === 'Approuvé' ? 'Approuver' : 'Rejeter'} cet avenant ?${statut === 'Approuvé' ? '\n\nIl sera intégré au marché révisé (budget + délai).' : ''}`)) return;
+    await window.api.avenants.updateStatut(id, statut);
+    showToast('Avenant ' + statut.toLowerCase(), '', statut === 'Approuvé' ? 'success' : 'warning');
+    renderAvenants(document.getElementById('hub-ave'));
+}
+async function deleteAvenant(id) {
+    if (!confirm('Supprimer cet avenant ?')) return;
+    await window.api.avenants.delete(id);
+    showToast('Supprimé', 'Avenant supprimé.', 'success');
+    renderAvenants(document.getElementById('hub-ave'));
+}
+
+async function renderGpa(container) {
+    const { projets, projetId } = await _budgetProjetSelector();
+    if (!projetId) { container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">🛡️</div><h4>Aucun projet</h4></div>'; return; }
+    const list = await window.api.gpa.getByProjet(projetId);
+    window._gpaList = list;
+    const today = new Date().toISOString().slice(0, 10);
+    container.innerHTML = `
+        <div class="page-header animate-fade-in-up">
+            <div><h2>GPA — Garantie de Parfait Achèvement</h2><p>Suivi des désordres 12 mois après réception → clôture et libération de la retenue de garantie</p></div>
+            <button class="btn btn-primary" onclick="showNewGpaModal(${projetId})"><i data-lucide="plus"></i> Ouvrir une GPA</button>
+        </div>
+        <div class="filter-bar animate-fade-in-up delay-1">
+            <select class="form-control" onchange="window._budgetProjet=parseInt(this.value);renderGpa(document.getElementById('hub-gpa'))">
+                ${projets.map(p => `<option value="${p.id}" ${p.id === projetId ? 'selected' : ''}>${p.code_projet} — ${p.intitule}</option>`).join('')}
+            </select>
+        </div>
+        <div class="card animate-fade-in-up delay-2"><div class="card-body">
+            ${list.length ? `<div class="table-wrapper"><table class="data-table">
+                <thead><tr><th>Lot</th><th>Réception</th><th>Fin GPA</th><th>Retenue</th><th>Désordres</th><th>Statut</th><th>Actions</th></tr></thead>
+                <tbody>${list.map(g => {
+        const expire = g.date_fin_gpa && g.date_fin_gpa < today && g.statut === 'En cours';
+        return `<tr>
+                    <td>${g.code_lot ? `<span class="badge badge-info">${g.code_lot}</span>` : '<span class="text-muted text-xs">Projet</span>'}</td>
+                    <td class="text-xs">${formatDate(g.date_reception)}</td>
+                    <td class="text-xs ${expire ? 'text-danger font-bold' : 'text-muted'}">${formatDate(g.date_fin_gpa)}${expire ? ' ⚠' : ''}</td>
+                    <td class="text-xs">${formatCurrency(g.montant_retenue)}</td>
+                    <td class="text-xs">${g.nb_ouverts > 0 ? `<span class="badge badge-danger">${g.nb_ouverts} ouvert(s)</span>` : (g.nb_desordres > 0 ? '<span class="badge badge-success">résolus</span>' : '<span class="text-muted">—</span>')}</td>
+                    <td>${g.statut === 'Clôturée' ? '<span class="badge badge-success">Clôturée</span>' : '<span class="badge badge-warning">En cours</span>'}</td>
+                    <td class="actions">
+                        <button class="btn btn-primary btn-sm" title="Désordres" onclick="showGpaDesordres(${g.id})"><i data-lucide="clipboard-list"></i></button>
+                        ${g.statut === 'En cours' ? `<button class="btn btn-ghost btn-sm" title="Clôturer (libère la retenue)" onclick="closeGpa(${g.id})"><i data-lucide="check-circle-2"></i></button>` : ''}
+                        <button class="btn btn-ghost btn-sm" title="Supprimer" onclick="deleteGpa(${g.id})"><i data-lucide="trash-2"></i></button>
+                    </td></tr>`;
+    }).join('')}</tbody>
+            </table></div>` : '<div class="empty-state p-lg"><div class="empty-state-icon">🛡️</div><p class="text-muted">Aucune GPA. Ouvrez-en une à la réception d’un lot pour suivre l’année de garantie.</p></div>'}
+        </div></div>
+    `;
+    if (window.lucide) lucide.createIcons({ node: container });
+}
+async function showNewGpaModal(projetId) {
+    const lots = await window.api.lots.getByProjet(projetId);
+    const today = new Date().toISOString().split('T')[0];
+    const body = `
+        <form id="form-gpa">
+            <div class="form-group"><label class="form-label">Lot (optionnel)</label><select class="form-control" name="lot_id"><option value="">— Tout le projet —</option>${lots.map(l => `<option value="${l.id}">${l.code_lot} — ${l.designation}</option>`).join('')}</select></div>
+            <div class="form-row">
+                <div class="form-group"><label class="form-label required">Date de réception</label><input type="date" class="form-control" name="date_reception" value="${today}" required></div>
+                <div class="form-group"><label class="form-label">Retenue de garantie (DH)</label><input type="number" step="0.01" class="form-control" name="montant_retenue" value="0"></div>
+            </div>
+            <div class="form-group"><label class="form-label">Observations</label><textarea class="form-control" name="observations" rows="2"></textarea></div>
+            <p class="text-xs text-muted">La fin de GPA est calculée automatiquement à réception + 12 mois.</p>
+        </form>`;
+    openModal('Ouvrir une GPA', body, `<button class="btn btn-ghost" onclick="closeModal()">Annuler</button><button class="btn btn-primary" onclick="submitGpa(${projetId})">Ouvrir</button>`, 'lg');
+}
+async function submitGpa(projetId) {
+    const data = Object.fromEntries(new FormData(document.getElementById('form-gpa')));
+    if (!data.date_reception) { showToast('Erreur', 'Date de réception requise.', 'danger'); return; }
+    data.projet_id = projetId;
+    if (!data.lot_id) data.lot_id = null;
+    try { await window.api.gpa.create(data); closeModal(); showToast('GPA ouverte', 'Garantie suivie sur 12 mois.', 'success'); renderGpa(document.getElementById('hub-gpa')); }
+    catch (err) { showToast('Erreur', err.message, 'danger'); }
+}
+async function closeGpa(id) {
+    if (!confirm('Clôturer cette GPA ?\n\nCela suppose tous les désordres résolus ; la retenue de garantie devient libérable.')) return;
+    const res = await window.api.gpa.close(id);
+    if (res && res.success) { showToast('GPA clôturée ✅', 'Retenue de garantie libérable.', 'success'); renderGpa(document.getElementById('hub-gpa')); }
+    else showToast('Impossible', (res && res.error) || 'Erreur.', 'warning');
+}
+async function deleteGpa(id) {
+    if (!confirm('Supprimer cette GPA et ses désordres ?')) return;
+    await window.api.gpa.delete(id);
+    showToast('Supprimé', 'GPA supprimée.', 'success');
+    renderGpa(document.getElementById('hub-gpa'));
+}
+async function showGpaDesordres(gpaId) {
+    const list = await window.api.gpa.getDesordres(gpaId);
+    const rows = list.length ? list.map(d => `
+        <div class="d-flex justify-between align-center" style="padding:8px 4px;border-bottom:1px solid var(--border-color);">
+            <div style="min-width:0;">
+                <div class="text-sm font-medium ${d.statut === 'Résolu' ? 'text-muted' : ''}" style="${d.statut === 'Résolu' ? 'text-decoration:line-through;' : ''}">${d.description}</div>
+                <div class="text-xs text-muted">${d.gravite || ''} · signalé ${formatDate(d.date_signalement)}${d.signale_par ? ' · ' + d.signale_par : ''}${d.date_resolution ? ' · résolu ' + formatDate(d.date_resolution) : ''}</div>
+            </div>
+            <div class="btn-group" style="flex:none;">
+                ${d.statut === 'Ouvert' ? `<button class="btn btn-success btn-sm" title="Marquer résolu" onclick="resolveGpaDesordre(${d.id}, ${gpaId})"><i data-lucide="check"></i></button>` : '<span class="badge badge-success">Résolu</span>'}
+                <button class="btn btn-ghost btn-sm" title="Supprimer" onclick="deleteGpaDesordre(${d.id}, ${gpaId})"><i data-lucide="trash-2"></i></button>
+            </div>
+        </div>`).join('') : '<div class="empty-state p-md"><p class="text-muted text-sm">Aucun désordre signalé.</p></div>';
+    const body = `
+        <div class="card-flat mb-md" style="border:1px solid var(--border-color);border-radius:8px;max-height:300px;overflow:auto;padding:0 10px;">${rows}</div>
+        <form id="form-desordre" class="d-flex gap-sm flex-wrap align-end">
+            <div class="form-group flex-1" style="min-width:180px;margin:0;"><label class="form-label required">Nouveau désordre</label><input type="text" class="form-control" name="description" placeholder="Ex : fissure, fuite, défaut…" required></div>
+            <div class="form-group" style="margin:0;"><label class="form-label">Gravité</label><select class="form-control" name="gravite"><option>Faible</option><option selected>Moyenne</option><option>Élevée</option></select></div>
+            <div class="form-group" style="margin:0;"><label class="form-label">Signalé par</label><input type="text" class="form-control" name="signale_par" placeholder="Exploitant…"></div>
+        </form>`;
+    openModal('Désordres GPA', body, `<button class="btn btn-ghost" onclick="closeModal()">Fermer</button><button class="btn btn-primary" onclick="submitGpaDesordre(${gpaId})"><i data-lucide="plus"></i> Ajouter</button>`, 'lg');
+    if (window.lucide) lucide.createIcons();
+}
+async function submitGpaDesordre(gpaId) {
+    const data = Object.fromEntries(new FormData(document.getElementById('form-desordre')));
+    if (!data.description) { showToast('Erreur', 'Description requise.', 'danger'); return; }
+    data.gpa_id = gpaId;
+    data.date_signalement = new Date().toISOString().split('T')[0];
+    await window.api.gpa.addDesordre(data);
+    showGpaDesordres(gpaId);
+    if (document.getElementById('hub-gpa')) renderGpa(document.getElementById('hub-gpa'));
+}
+async function resolveGpaDesordre(id, gpaId) {
+    await window.api.gpa.resolveDesordre(id);
+    showToast('Résolu', 'Désordre marqué résolu.', 'success');
+    showGpaDesordres(gpaId);
+    if (document.getElementById('hub-gpa')) renderGpa(document.getElementById('hub-gpa'));
+}
+async function deleteGpaDesordre(id, gpaId) {
+    if (!confirm('Supprimer ce désordre ?')) return;
+    await window.api.gpa.deleteDesordre(id);
+    showGpaDesordres(gpaId);
+    if (document.getElementById('hub-gpa')) renderGpa(document.getElementById('hub-gpa'));
 }
 
 async function renderOrdresService(container) {
