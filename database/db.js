@@ -1251,6 +1251,36 @@ class AppDatabase {
     }
     getIndexValue(nom, mois) { return this.getScalar('SELECT valeur FROM revision_index WHERE index_nom = ? AND mois = ? LIMIT 1', [nom, mois]); }
     deleteRevisionIndex(id) { return this._deleteRow('revision_index', id); }
+
+    // ---- Pénalités de retard (s'appuie sur la fin prévisionnelle de l'axe de délai) ----
+    computePenalite(data) {
+        // Fin prévisionnelle : depuis l'axe de délai (intègre prolongations + arrêts) si lot fourni
+        let finPrev = data.date_fin_prevue || null;
+        if (data.lot_id && data.projet_id) {
+            try { const axis = this.getDelaiAxis(data.projet_id); const L = (axis.lots || []).find(l => l.id === parseInt(data.lot_id) && l.hasData); if (L && L.finPrev) finPrev = L.finPrev; } catch (e) {}
+        }
+        const montant = parseFloat(data.montant_base) || 0;
+        const taux = parseFloat(data.taux_journalier) || 0;
+        const plafondPct = parseFloat(data.plafond_pct); const plafP = isNaN(plafondPct) ? 8 : plafondPct;
+        let jours = 0;
+        if (finPrev && data.date_achevement) {
+            const a = new Date(String(finPrev).slice(0, 10) + 'T00:00:00Z'), b = new Date(String(data.date_achevement).slice(0, 10) + 'T00:00:00Z');
+            jours = Math.max(0, Math.round((b - a) / 86400000));
+        }
+        const brute = montant * taux * jours;
+        const plafond = montant * plafP / 100;
+        const plafonnee = brute > plafond ? 1 : 0;
+        const penalite = Math.round(Math.min(brute, plafond) * 100) / 100;
+        const res = this.run(`INSERT INTO penalites (projet_id, lot_id, libelle, montant_base, date_fin_prevue, date_achevement, jours_retard, taux_journalier, plafond_pct, montant_penalite, plafonnee)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [data.projet_id, data.lot_id || null, data.libelle || null, montant, finPrev, data.date_achevement || null, jours, taux, plafP, penalite, plafonnee]);
+        this.logEvent({ acteur_type: 'MOD', action: 'Pénalité de retard calculée', cible_type: 'penalite', cible_id: res.lastInsertRowid, projet_id: data.projet_id, details: `${jours} j · ${Math.round(penalite)} DH` });
+        return { success: true, id: res.lastInsertRowid, jours_retard: jours, montant_penalite: penalite, date_fin_prevue: finPrev, plafonnee: !!plafonnee };
+    }
+    getPenalites(projetId) {
+        return this.all('SELECT p.*, l.code_lot FROM penalites p LEFT JOIN lots l ON p.lot_id = l.id WHERE p.projet_id = ? ORDER BY p.id DESC', [projetId]);
+    }
+    deletePenalite(id) { return this._deleteRow('penalites', id); }
     getDocument(id) { return this.get('SELECT * FROM documents WHERE id = ?', [id]); }
     getDocumentsByEntity(entiteType, entiteId) {
         return this.all('SELECT * FROM documents WHERE entite_type = ? AND entite_id = ? ORDER BY created_at DESC', [entiteType, entiteId]);

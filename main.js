@@ -244,6 +244,9 @@ function setupIPC() {
     ipcMain.handle('revision:setIndex', (event, data) => db.setRevisionIndex(data));
     ipcMain.handle('revision:getIndex', (event, indexNom) => db.getRevisionIndex(indexNom));
     ipcMain.handle('revision:deleteIndex', (event, id) => db.deleteRevisionIndex(id));
+    ipcMain.handle('penalites:compute', (event, data) => db.computePenalite(data));
+    ipcMain.handle('penalites:getByProjet', (event, projetId) => db.getPenalites(projetId));
+    ipcMain.handle('penalites:delete', (event, id) => db.deletePenalite(id));
     ipcMain.handle('os:create', (event, data) => db.createOS(data));
 
     // ---- Essais Labo ----

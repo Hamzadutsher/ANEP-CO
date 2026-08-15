@@ -2241,6 +2241,7 @@ function renderBudgetHub(c) {
         { pid: 'hub-bud', label: 'Budget', icon: 'trending-up', render: renderBudgetTab },
         { pid: 'hub-ave', label: 'Avenants', icon: 'file-diff', render: renderAvenants },
         { pid: 'hub-rev', label: 'Révision des prix', icon: 'percent', render: renderRevision },
+        { pid: 'hub-pen', label: 'Pénalités de retard', icon: 'alarm-clock-off', render: renderPenalites },
         { pid: 'hub-gpa', label: 'GPA (garantie)', icon: 'shield-check', render: renderGpa }
     ]);
 }
@@ -2594,19 +2595,24 @@ async function submitFormule(projetId) {
     catch (err) { showToast('Erreur', err.message, 'danger'); }
 }
 async function deleteRevisionFormule(id) { if (!confirm('Supprimer cette formule et ses calculs ?')) return; await window.api.revision.deleteFormule(id); renderRevision(document.getElementById('hub-rev')); }
-function showNewCalculModal(projetId) {
+async function showNewCalculModal(projetId) {
     const formules = window._revFormules || [];
     if (!formules.length) { showToast('Info', 'Créez d’abord une formule.', 'info'); return; }
+    let decomptes = [];
+    try { decomptes = await window.api.decomptes.getByProjet(projetId); } catch (e) {}
+    window._revDecomptes = decomptes;
     const body = `
         <form id="form-calcul">
             <div class="form-row">
                 <div class="form-group"><label class="form-label required">Formule</label><select class="form-control" id="calc-formule" onchange="renderCalculTermes()">${formules.map(f => `<option value="${f.id}">${f.intitule}</option>`).join('')}</select></div>
-                <div class="form-group"><label class="form-label">Libellé</label><input type="text" class="form-control" name="libelle" placeholder="Décompte n°3"></div>
+                <div class="form-group"><label class="form-label">Décompte lié (optionnel)</label><select class="form-control" id="calc-decompte" onchange="prefillCalculFromDecompte()"><option value="">— Aucun —</option>${decomptes.map(d => `<option value="${d.id}" data-montant="${d.montant_ht}" data-num="${d.numero}">${d.numero} — ${formatCurrency(d.montant_ht)} HT</option>`).join('')}</select></div>
             </div>
             <div class="form-row">
                 <div class="form-group"><label class="form-label required">Montant à réviser (DH)</label><input type="number" step="0.01" class="form-control" name="montant_base" placeholder="0"></div>
+                <div class="form-group"><label class="form-label">Libellé</label><input type="text" class="form-control" name="libelle" placeholder="Décompte n°3"></div>
                 <div class="form-group"><label class="form-label">Mois de révision</label><input type="month" class="form-control" name="mois_revision"></div>
             </div>
+            <div id="calc-arrets" class="text-xs text-muted mb-sm"></div>
             <div class="d-flex justify-between align-center">
                 <label class="form-label" style="margin:0;">Valeurs actuelles des index</label>
                 <button type="button" class="btn btn-ghost btn-sm" onclick="autofillCalculFromIndex()"><i data-lucide="wand-2"></i> Auto-remplir (base d'index)</button>
@@ -2618,12 +2624,28 @@ function showNewCalculModal(projetId) {
     renderCalculTermes();
     if (window.lucide) lucide.createIcons();
 }
-function renderCalculTermes() {
+function prefillCalculFromDecompte() {
+    const sel = document.getElementById('calc-decompte'); const f = document.getElementById('form-calcul');
+    const opt = sel.options[sel.selectedIndex];
+    if (opt && opt.value) { if (f.montant_base) f.montant_base.value = opt.dataset.montant || ''; if (f.libelle && !f.libelle.value) f.libelle.value = 'Révision ' + (opt.dataset.num || ''); }
+}
+async function renderCalculTermes() {
     const sel = document.getElementById('calc-formule'); const c = document.getElementById('calc-termes'); if (!sel || !c) return;
     const f = (window._revFormules || []).find(x => x.id === parseInt(sel.value));
     if (!f) { c.innerHTML = ''; return; }
     c.innerHTML = (f.termes || []).map(t => `<div class="form-row"><div class="form-group"><label class="form-label">${t.index_nom} <span class="text-xs text-muted">(coeff ${t.coefficient} · base ${t.valeur_base})</span></label><input type="number" step="0.01" class="form-control calc-val" data-terme="${t.id}" placeholder="valeur de l'index au mois de révision"></div></div>`).join('') || '<p class="text-xs text-muted">Formule sans terme (partie fixe seule → K = a).</p>';
     if (window.lucide) lucide.createIcons({ node: c });
+    // Note arrêts-reprises du lot de la formule (l'index peut être gelé pendant un arrêt)
+    const note = document.getElementById('calc-arrets'); if (!note) return; note.innerHTML = '';
+    if (f.lot_id) {
+        try {
+            const axis = await window.api.timeline.axis(f.projet_id);
+            const L = (axis.lots || []).find(l => l.id === f.lot_id && l.hasData);
+            if (L && L.arrets && L.arrets.length) {
+                note.innerHTML = `⏸️ Arrêts-reprises du lot : ${L.arrets.map(a => `${formatDate(a.debut)}→${a.fin ? formatDate(a.fin) : 'en cours'}`).join(', ')} — pensez à retenir le mois d'index gelé pendant l'arrêt.`;
+            }
+        } catch (e) {}
+    }
 }
 async function autofillCalculFromIndex() {
     const f = document.getElementById('form-calcul');
@@ -2645,7 +2667,8 @@ async function submitCalcul(projetId) {
     const montant_base = parseFloat(f.montant_base.value) || 0;
     if (!montant_base) { showToast('Erreur', 'Montant à réviser requis.', 'danger'); return; }
     const valeurs = {}; f.querySelectorAll('.calc-val').forEach(i => { valeurs[i.dataset.terme] = i.value; });
-    const data = { formule_id, projet_id: projetId, montant_base, mois_revision: f.mois_revision.value || null, libelle: f.libelle.value || null, valeurs };
+    const decSel = document.getElementById('calc-decompte');
+    const data = { formule_id, projet_id: projetId, decompte_id: (decSel && decSel.value) ? parseInt(decSel.value) : null, montant_base, mois_revision: f.mois_revision.value || null, libelle: f.libelle.value || null, valeurs };
     try {
         const r = await window.api.revision.calculer(data);
         if (r && r.success) {
@@ -2660,6 +2683,80 @@ async function submitCalcul(projetId) {
     } catch (err) { showToast('Erreur', err.message, 'danger'); }
 }
 async function deleteRevisionCalcul(id) { if (!confirm('Supprimer ce calcul ?')) return; await window.api.revision.deleteCalcul(id); renderRevision(document.getElementById('hub-rev')); }
+
+// ---- Pénalités de retard ----
+async function renderPenalites(container) {
+    const { projets, projetId } = await _budgetProjetSelector();
+    if (!projetId) { container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">⏱️</div><h4>Aucun projet</h4></div>'; return; }
+    const list = await window.api.penalites.getByProjet(projetId);
+    const total = list.reduce((s, p) => s + (p.montant_penalite || 0), 0);
+    container.innerHTML = `
+        <div class="page-header animate-fade-in-up">
+            <div><h2>Pénalités de retard</h2><p>Pénalité = montant × taux journalier × jours de retard (plafonnée) · retard depuis la fin prévisionnelle de l'axe de délai (arrêts + prolongations inclus)</p></div>
+            <button class="btn btn-primary" onclick="showNewPenaliteModal(${projetId})"><i data-lucide="calculator"></i> Calculer une pénalité</button>
+        </div>
+        <div class="filter-bar animate-fade-in-up delay-1"><select class="form-control" onchange="window._budgetProjet=parseInt(this.value);renderPenalites(document.getElementById('hub-pen'))">
+            ${projets.map(p => `<option value="${p.id}" ${p.id === projetId ? 'selected' : ''}>${p.code_projet} — ${p.intitule}</option>`).join('')}
+        </select></div>
+        ${total > 0 ? `<div class="stat-card stat-danger mb-lg animate-fade-in-up delay-1" style="max-width:340px;"><div class="stat-icon"><i data-lucide="alarm-clock-off"></i></div><div class="stat-content"><div class="stat-value text-md">${formatCurrency(total)}</div><div class="stat-label">Total pénalités</div></div></div>` : ''}
+        <div class="card animate-fade-in-up delay-2"><div class="card-body">
+            ${list.length ? `<div class="table-wrapper"><table class="data-table">
+                <thead><tr><th>Libellé</th><th>Lot</th><th>Montant</th><th>Fin prévue</th><th>Achèvement</th><th>Retard</th><th>Taux</th><th>Pénalité</th><th></th></tr></thead>
+                <tbody>${list.map(p => `<tr>
+                    <td class="text-sm">${p.libelle || '—'}</td>
+                    <td class="text-xs">${p.code_lot ? `<span class="badge badge-info">${p.code_lot}</span>` : '—'}</td>
+                    <td class="text-xs">${formatCurrency(p.montant_base)}</td>
+                    <td class="text-xs text-muted">${formatDate(p.date_fin_prevue)}</td>
+                    <td class="text-xs text-muted">${formatDate(p.date_achevement)}</td>
+                    <td class="text-xs ${p.jours_retard > 0 ? 'text-danger font-bold' : ''}">${p.jours_retard} j</td>
+                    <td class="text-xs">${(p.taux_journalier * 1000).toFixed(2)}‰/j</td>
+                    <td class="font-bold text-danger">${formatCurrency(p.montant_penalite)}${p.plafonnee ? ' <span class="badge badge-warning">plafond</span>' : ''}</td>
+                    <td><button class="btn btn-ghost btn-sm" onclick="deletePenalite(${p.id})"><i data-lucide="trash-2"></i></button></td>
+                </tr>`).join('')}</tbody></table></div>` : '<div class="empty-state p-md"><div class="empty-state-icon">⏱️</div><p class="text-muted text-sm">Aucune pénalité calculée.</p></div>'}
+        </div></div>`;
+    if (window.lucide) lucide.createIcons({ node: container });
+}
+async function showNewPenaliteModal(projetId) {
+    const lots = await window.api.lots.getByProjet(projetId);
+    const today = new Date().toISOString().split('T')[0];
+    const body = `
+        <form id="form-penalite">
+            <div class="form-row">
+                <div class="form-group"><label class="form-label">Libellé</label><input type="text" class="form-control" name="libelle" placeholder="Pénalité lot Gros Œuvre"></div>
+                <div class="form-group"><label class="form-label">Lot (fin prévue auto)</label><select class="form-control" name="lot_id"><option value="">— Saisie manuelle —</option>${lots.map(l => `<option value="${l.id}">${l.code_lot} — ${l.designation}</option>`).join('')}</select></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label class="form-label required">Montant marché (DH)</label><input type="number" step="0.01" class="form-control" name="montant_base" placeholder="0"></div>
+                <div class="form-group"><label class="form-label">Fin prévue (si pas de lot)</label><input type="date" class="form-control" name="date_fin_prevue"></div>
+                <div class="form-group"><label class="form-label required">Achèvement réel</label><input type="date" class="form-control" name="date_achevement" value="${today}"></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label class="form-label">Taux journalier (‰)</label><input type="number" step="0.01" class="form-control" name="taux_pm" value="1"></div>
+                <div class="form-group"><label class="form-label">Plafond (% du marché)</label><input type="number" step="0.1" class="form-control" name="plafond_pct" value="8"></div>
+            </div>
+            <div id="penalite-result" class="mt-md"></div>
+        </form>`;
+    openModal('Calcul de pénalité de retard', body, `<button class="btn btn-ghost" onclick="closeModal()">Fermer</button><button class="btn btn-primary" onclick="submitPenalite(${projetId})">Calculer &amp; enregistrer</button>`, 'lg');
+}
+async function submitPenalite(projetId) {
+    const f = document.getElementById('form-penalite');
+    const montant = parseFloat(f.montant_base.value) || 0;
+    if (!montant || !f.date_achevement.value) { showToast('Erreur', 'Montant et date d’achèvement requis.', 'danger'); return; }
+    const data = { projet_id: projetId, lot_id: f.lot_id.value || null, libelle: f.libelle.value || null, montant_base: montant, date_fin_prevue: f.date_fin_prevue.value || null, date_achevement: f.date_achevement.value, taux_journalier: (parseFloat(f.taux_pm.value) || 0) / 1000, plafond_pct: f.plafond_pct.value };
+    try {
+        const r = await window.api.penalites.compute(data);
+        if (r && r.success) {
+            document.getElementById('penalite-result').innerHTML = `<div class="p-md" style="background:var(--bg-tertiary);border-radius:8px;">
+                <div class="d-flex justify-between"><span class="text-sm">Fin prévisionnelle retenue</span><strong>${formatDate(r.date_fin_prevue) || '—'}</strong></div>
+                <div class="d-flex justify-between mt-sm"><span class="text-sm">Jours de retard</span><strong class="${r.jours_retard > 0 ? 'text-danger' : ''}">${r.jours_retard} j</strong></div>
+                <div class="d-flex justify-between mt-sm"><span class="text-sm">Pénalité</span><strong class="text-danger">${formatCurrency(r.montant_penalite)}${r.plafonnee ? ' (plafonnée)' : ''}</strong></div>
+            </div>`;
+            showToast('Calculé ✅', r.jours_retard + ' j de retard', 'success');
+            renderPenalites(document.getElementById('hub-pen'));
+        } else showToast('Erreur', (r && r.error) || 'Calcul impossible.', 'danger');
+    } catch (err) { showToast('Erreur', err.message, 'danger'); }
+}
+async function deletePenalite(id) { if (!confirm('Supprimer cette pénalité ?')) return; await window.api.penalites.delete(id); renderPenalites(document.getElementById('hub-pen')); }
 
 async function renderOrdresService(container) {
     updatePageTitle('Ordres de Service');

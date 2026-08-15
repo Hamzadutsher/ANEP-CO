@@ -164,6 +164,11 @@ contextBridge.exposeInMainWorld('api', {
         getIndex: (indexNom) => ipcRenderer.invoke('revision:getIndex', indexNom),
         deleteIndex: (id) => ipcRenderer.invoke('revision:deleteIndex', id)
     },
+    penalites: {
+        compute: (data) => ipcRenderer.invoke('penalites:compute', data),
+        getByProjet: (projetId) => ipcRenderer.invoke('penalites:getByProjet', projetId),
+        delete: (id) => ipcRenderer.invoke('penalites:delete', id)
+    },
 
     // Essais Labo
     essais: {

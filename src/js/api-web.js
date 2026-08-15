@@ -151,6 +151,9 @@
             getCalculs: id => rpc('revision:getCalculs', id), deleteCalcul: id => rpc('revision:deleteCalcul', id),
             setIndex: d => rpc('revision:setIndex', d), getIndex: n => rpc('revision:getIndex', n), deleteIndex: id => rpc('revision:deleteIndex', id)
         },
+        penalites: {
+            compute: d => rpc('penalites:compute', d), getByProjet: id => rpc('penalites:getByProjet', id), delete: id => rpc('penalites:delete', id)
+        },
         essais: {
             getByOuvrage: id => rpc('essais:getByOuvrage', id), getEnCours: id => rpc('essais:getEnCours', id),
             create: d => rpc('essais:create', d), updateResultat: (id, d) => rpc('essais:updateResultat', id, d),

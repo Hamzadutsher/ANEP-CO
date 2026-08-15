@@ -558,6 +558,24 @@ CREATE TABLE IF NOT EXISTS revision_termes (
     valeur_base REAL DEFAULT 0,
     FOREIGN KEY (formule_id) REFERENCES revision_formules(id) ON DELETE CASCADE
 );
+-- Pénalités de retard (montant marché × taux journalier × jours de retard, plafonné)
+CREATE TABLE IF NOT EXISTS penalites (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    projet_id INTEGER NOT NULL,
+    lot_id INTEGER,
+    libelle TEXT,
+    montant_base REAL DEFAULT 0,
+    date_fin_prevue TEXT,
+    date_achevement TEXT,
+    jours_retard INTEGER DEFAULT 0,
+    taux_journalier REAL DEFAULT 0.001,
+    plafond_pct REAL DEFAULT 8,
+    montant_penalite REAL DEFAULT 0,
+    plafonnee INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (projet_id) REFERENCES projets(id) ON DELETE CASCADE
+);
+
 -- Base d'index BTP (valeurs mensuelles officielles saisies par le MOD)
 CREATE TABLE IF NOT EXISTS revision_index (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
