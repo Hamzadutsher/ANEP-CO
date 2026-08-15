@@ -235,6 +235,15 @@ function setupIPC() {
     ipcMain.handle('checklist:get', (event, typeReception) => db.getChecklistItems(typeReception));
     ipcMain.handle('checklist:add', (event, data) => db.addChecklistItem(data));
     ipcMain.handle('checklist:delete', (event, id) => db.deleteChecklistItem(id));
+    ipcMain.handle('revision:getFormules', (event, projetId) => db.getRevisionFormules(projetId));
+    ipcMain.handle('revision:createFormule', (event, data) => db.createRevisionFormule(data));
+    ipcMain.handle('revision:deleteFormule', (event, id) => db.deleteRevisionFormule(id));
+    ipcMain.handle('revision:calculer', (event, data) => db.createRevisionCalcul(data));
+    ipcMain.handle('revision:getCalculs', (event, projetId) => db.getRevisionCalculs(projetId));
+    ipcMain.handle('revision:deleteCalcul', (event, id) => db.deleteRevisionCalcul(id));
+    ipcMain.handle('revision:setIndex', (event, data) => db.setRevisionIndex(data));
+    ipcMain.handle('revision:getIndex', (event, indexNom) => db.getRevisionIndex(indexNom));
+    ipcMain.handle('revision:deleteIndex', (event, id) => db.deleteRevisionIndex(id));
     ipcMain.handle('os:create', (event, data) => db.createOS(data));
 
     // ---- Essais Labo ----

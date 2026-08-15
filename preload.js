@@ -153,6 +153,17 @@ contextBridge.exposeInMainWorld('api', {
         add: (data) => ipcRenderer.invoke('checklist:add', data),
         delete: (id) => ipcRenderer.invoke('checklist:delete', id)
     },
+    revision: {
+        getFormules: (projetId) => ipcRenderer.invoke('revision:getFormules', projetId),
+        createFormule: (data) => ipcRenderer.invoke('revision:createFormule', data),
+        deleteFormule: (id) => ipcRenderer.invoke('revision:deleteFormule', id),
+        calculer: (data) => ipcRenderer.invoke('revision:calculer', data),
+        getCalculs: (projetId) => ipcRenderer.invoke('revision:getCalculs', projetId),
+        deleteCalcul: (id) => ipcRenderer.invoke('revision:deleteCalcul', id),
+        setIndex: (data) => ipcRenderer.invoke('revision:setIndex', data),
+        getIndex: (indexNom) => ipcRenderer.invoke('revision:getIndex', indexNom),
+        deleteIndex: (id) => ipcRenderer.invoke('revision:deleteIndex', id)
+    },
 
     // Essais Labo
     essais: {

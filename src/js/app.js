@@ -2240,6 +2240,7 @@ function renderBudgetHub(c) {
     return renderTabHub(c, 'Budget, avenants & GPA', [
         { pid: 'hub-bud', label: 'Budget', icon: 'trending-up', render: renderBudgetTab },
         { pid: 'hub-ave', label: 'Avenants', icon: 'file-diff', render: renderAvenants },
+        { pid: 'hub-rev', label: 'Révision des prix', icon: 'percent', render: renderRevision },
         { pid: 'hub-gpa', label: 'GPA (garantie)', icon: 'shield-check', render: renderGpa }
     ]);
 }
@@ -2479,6 +2480,186 @@ async function deleteGpaDesordre(id, gpaId) {
     showGpaDesordres(gpaId);
     if (document.getElementById('hub-gpa')) renderGpa(document.getElementById('hub-gpa'));
 }
+
+// ---- Révision des prix (formule à indices) ----
+function _formuleSum(f) { return (parseFloat(f.partie_fixe) || 0) + (f.termes || []).reduce((s, t) => s + (parseFloat(t.coefficient) || 0), 0); }
+async function renderRevision(container) {
+    const { projets, projetId } = await _budgetProjetSelector();
+    if (!projetId) { container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📈</div><h4>Aucun projet</h4></div>'; return; }
+    const formules = await window.api.revision.getFormules(projetId);
+    const calculs = await window.api.revision.getCalculs(projetId);
+    const indexList = await window.api.revision.getIndex();
+    window._revFormules = formules;
+    container.innerHTML = `
+        <div class="page-header animate-fade-in-up">
+            <div><h2>Révision des prix</h2><p>K = partie fixe + Σ [coefficient × (index actuel / index de base)] · montant révisé = montant × K</p></div>
+            <div class="btn-group">
+                <button class="btn btn-ghost" onclick="showNewFormuleModal(${projetId})"><i data-lucide="sigma"></i> Nouvelle formule</button>
+                <button class="btn btn-primary" onclick="showNewCalculModal(${projetId})"><i data-lucide="calculator"></i> Calculer</button>
+            </div>
+        </div>
+        <div class="filter-bar animate-fade-in-up delay-1"><select class="form-control" onchange="window._budgetProjet=parseInt(this.value);renderRevision(document.getElementById('hub-rev'))">
+            ${projets.map(p => `<option value="${p.id}" ${p.id === projetId ? 'selected' : ''}>${p.code_projet} — ${p.intitule}</option>`).join('')}
+        </select></div>
+        <div class="card animate-fade-in-up delay-2"><div class="card-header"><h4><i data-lucide="sigma" style="width:18px;height:18px;margin-right:8px;"></i>Formules</h4></div><div class="card-body">
+            ${formules.length ? formules.map(f => { const s = _formuleSum(f); const ok = Math.abs(s - 1) < 0.001; return `
+                <div style="padding:10px 0;border-bottom:1px solid var(--border-color);">
+                    <div class="d-flex justify-between align-center flex-wrap gap-sm">
+                        <div><strong class="text-sm">${f.intitule}</strong> ${f.code_lot ? `<span class="badge badge-info">${f.code_lot}</span>` : ''} ${f.mois_base ? `<span class="text-xs text-muted">· base ${f.mois_base}</span>` : ''}</div>
+                        <div><span class="badge ${ok ? 'badge-success' : 'badge-warning'}">Σ = ${s.toFixed(3)}${ok ? '' : ' ⚠'}</span> <button class="btn btn-ghost btn-sm" onclick="deleteRevisionFormule(${f.id})"><i data-lucide="trash-2"></i></button></div>
+                    </div>
+                    <div class="text-xs text-muted mt-sm">K = ${(parseFloat(f.partie_fixe) || 0).toFixed(2)}${(f.termes || []).map(t => ` + ${(parseFloat(t.coefficient) || 0).toFixed(2)}·(${t.index_nom}/${t.valeur_base})`).join('')}</div>
+                </div>`; }).join('') : '<div class="empty-state p-md"><p class="text-muted text-sm">Aucune formule. Créez-en une (partie fixe + termes à indices).</p></div>'}
+        </div></div>
+        <div class="card mt-lg animate-fade-in-up delay-3"><div class="card-header"><h4><i data-lucide="calculator" style="width:18px;height:18px;margin-right:8px;"></i>Calculs de révision</h4></div><div class="card-body">
+            ${calculs.length ? `<div class="table-wrapper"><table class="data-table">
+                <thead><tr><th>Libellé</th><th>Formule</th><th>Mois</th><th>Montant base</th><th>K</th><th>Montant révisé</th><th>Écart</th><th></th></tr></thead>
+                <tbody>${calculs.map(c => `<tr>
+                    <td class="text-sm">${c.libelle || '—'}</td><td class="text-xs">${c.formule_nom}</td>
+                    <td class="text-xs text-muted">${c.mois_revision || '—'}</td>
+                    <td class="text-xs">${formatCurrency(c.montant_base)}</td>
+                    <td class="font-bold ${c.coefficient_k >= 1 ? 'text-info' : 'text-danger'}">${c.coefficient_k}</td>
+                    <td class="font-medium">${formatCurrency(c.montant_revise)}</td>
+                    <td class="text-xs ${c.ecart >= 0 ? 'text-success' : 'text-danger'}">${c.ecart >= 0 ? '+' : ''}${formatCurrency(c.ecart)}</td>
+                    <td><button class="btn btn-ghost btn-sm" onclick="deleteRevisionCalcul(${c.id})"><i data-lucide="trash-2"></i></button></td>
+                </tr>`).join('')}</tbody></table></div>` : '<div class="empty-state p-md"><p class="text-muted text-sm">Aucun calcul de révision.</p></div>'}
+        </div></div>
+        <div class="card mt-lg animate-fade-in-up delay-3"><div class="card-header"><h4><i data-lucide="database" style="width:18px;height:18px;margin-right:8px;"></i>Base d'index (valeurs mensuelles officielles)</h4></div><div class="card-body">
+            <form id="form-index" class="d-flex gap-sm align-end flex-wrap" onsubmit="return false;">
+                <div class="form-group" style="margin:0;min-width:130px;"><label class="form-label">Index</label><input type="text" class="form-control" id="idx-nom" placeholder="Acier, BAT6…"></div>
+                <div class="form-group" style="margin:0;"><label class="form-label">Mois</label><input type="month" class="form-control" id="idx-mois"></div>
+                <div class="form-group" style="margin:0;"><label class="form-label">Valeur</label><input type="number" step="0.01" class="form-control" id="idx-val" placeholder="0"></div>
+                <div class="form-group" style="margin:0;"><label class="form-label">Type</label><select class="form-control" id="idx-type"><option>Définitif</option><option>Provisoire</option></select></div>
+                <button class="btn btn-primary" onclick="saveRevisionIndex(${projetId})"><i data-lucide="plus"></i> Ajouter</button>
+            </form>
+            <div class="mt-md">${indexList.length ? `<div class="table-wrapper"><table class="data-table"><thead><tr><th>Index</th><th>Mois</th><th>Valeur</th><th>Type</th><th></th></tr></thead>
+                <tbody>${indexList.map(ix => `<tr><td class="font-medium text-sm">${ix.index_nom}</td><td class="text-xs">${ix.mois}</td><td class="text-xs">${ix.valeur}</td><td>${ix.type === 'Provisoire' ? '<span class="badge badge-warning">Provisoire</span>' : '<span class="badge badge-success">Définitif</span>'}</td><td><button class="btn btn-ghost btn-sm" onclick="deleteRevisionIndex(${ix.id})"><i data-lucide="trash-2"></i></button></td></tr>`).join('')}</tbody></table></div>` : '<p class="text-muted text-xs">Aucun index saisi. Renseignez les valeurs officielles pour l\'auto-remplissage des calculs par date.</p>'}</div>
+        </div></div>`;
+    if (window.lucide) lucide.createIcons({ node: container });
+}
+async function saveRevisionIndex(projetId) {
+    const nom = (document.getElementById('idx-nom') || {}).value || '';
+    const mois = (document.getElementById('idx-mois') || {}).value || '';
+    const val = (document.getElementById('idx-val') || {}).value || '';
+    if (!nom.trim() || !mois || val === '') { showToast('Erreur', 'Index, mois et valeur requis.', 'danger'); return; }
+    await window.api.revision.setIndex({ index_nom: nom.trim(), mois, valeur: val, type: (document.getElementById('idx-type') || {}).value || 'Définitif' });
+    showToast('Index enregistré', '', 'success');
+    renderRevision(document.getElementById('hub-rev'));
+}
+async function deleteRevisionIndex(id) { await window.api.revision.deleteIndex(id); renderRevision(document.getElementById('hub-rev')); }
+async function showNewFormuleModal(projetId) {
+    const lots = await window.api.lots.getByProjet(projetId);
+    const body = `
+        <form id="form-formule">
+            <div class="form-row">
+                <div class="form-group"><label class="form-label required">Intitulé</label><input type="text" class="form-control" name="intitule" placeholder="Révision lot Gros Œuvre" required></div>
+                <div class="form-group"><label class="form-label">Lot</label><select class="form-control" name="lot_id"><option value="">— Projet —</option>${lots.map(l => `<option value="${l.id}">${l.code_lot} — ${l.designation}</option>`).join('')}</select></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label class="form-label">Partie fixe (a)</label><input type="number" step="0.01" class="form-control" name="partie_fixe" value="0.15" oninput="updateFormuleSum()"></div>
+                <div class="form-group"><label class="form-label">Mois de base (index₀)</label><input type="month" class="form-control" name="mois_base"></div>
+            </div>
+            <label class="form-label">Termes à indices (nom · coefficient · valeur de base)</label>
+            <div id="formule-termes"></div>
+            <button type="button" class="btn btn-ghost btn-sm mt-sm" onclick="addFormuleTermRow()"><i data-lucide="plus"></i> Ajouter un terme</button>
+            <div class="mt-md p-sm" style="background:var(--bg-tertiary);border-radius:8px;"><div class="d-flex justify-between"><span class="text-sm">Somme a + Σ coefficients</span><span id="formule-sum" class="font-bold">—</span></div><div class="text-xs text-muted">doit être égale à 1,00</div></div>
+        </form>`;
+    openModal('Nouvelle formule de révision', body, `<button class="btn btn-ghost" onclick="closeModal()">Annuler</button><button class="btn btn-primary" onclick="submitFormule(${projetId})">Enregistrer</button>`, 'lg');
+    addFormuleTermRow(); addFormuleTermRow();
+    updateFormuleSum();
+    if (window.lucide) lucide.createIcons();
+}
+function addFormuleTermRow() {
+    const c = document.getElementById('formule-termes'); if (!c) return;
+    const row = document.createElement('div'); row.className = 'form-row formule-term';
+    row.innerHTML = `<div class="form-group"><input type="text" class="form-control t-nom" placeholder="Index (Acier, Ciment, MO…)"></div>
+        <div class="form-group"><input type="number" step="0.01" class="form-control t-coef" placeholder="coefficient" oninput="updateFormuleSum()"></div>
+        <div class="form-group"><input type="number" step="0.01" class="form-control t-base" placeholder="valeur base"></div>
+        <button type="button" class="btn btn-ghost btn-sm" title="Retirer" onclick="this.parentElement.remove();updateFormuleSum()"><i data-lucide="x"></i></button>`;
+    c.appendChild(row);
+    if (window.lucide) lucide.createIcons({ node: row });
+}
+function updateFormuleSum() {
+    const f = document.getElementById('form-formule'); if (!f) return;
+    let sum = parseFloat(f.partie_fixe.value) || 0;
+    f.querySelectorAll('.t-coef').forEach(i => sum += parseFloat(i.value) || 0);
+    const el = document.getElementById('formule-sum'); if (el) { el.textContent = sum.toFixed(3); el.className = 'font-bold ' + (Math.abs(sum - 1) < 0.001 ? 'text-success' : 'text-warning'); }
+}
+async function submitFormule(projetId) {
+    const f = document.getElementById('form-formule');
+    const intitule = f.intitule.value.trim(); if (!intitule) { showToast('Erreur', 'Intitulé requis.', 'danger'); return; }
+    const termes = [...f.querySelectorAll('.formule-term')].map(r => ({ index_nom: r.querySelector('.t-nom').value.trim(), coefficient: r.querySelector('.t-coef').value, valeur_base: r.querySelector('.t-base').value })).filter(t => t.index_nom);
+    const data = { projet_id: projetId, intitule, partie_fixe: f.partie_fixe.value, mois_base: f.mois_base.value || null, lot_id: f.lot_id.value || null, termes };
+    try { await window.api.revision.createFormule(data); closeModal(); showToast('Formule créée', '', 'success'); renderRevision(document.getElementById('hub-rev')); }
+    catch (err) { showToast('Erreur', err.message, 'danger'); }
+}
+async function deleteRevisionFormule(id) { if (!confirm('Supprimer cette formule et ses calculs ?')) return; await window.api.revision.deleteFormule(id); renderRevision(document.getElementById('hub-rev')); }
+function showNewCalculModal(projetId) {
+    const formules = window._revFormules || [];
+    if (!formules.length) { showToast('Info', 'Créez d’abord une formule.', 'info'); return; }
+    const body = `
+        <form id="form-calcul">
+            <div class="form-row">
+                <div class="form-group"><label class="form-label required">Formule</label><select class="form-control" id="calc-formule" onchange="renderCalculTermes()">${formules.map(f => `<option value="${f.id}">${f.intitule}</option>`).join('')}</select></div>
+                <div class="form-group"><label class="form-label">Libellé</label><input type="text" class="form-control" name="libelle" placeholder="Décompte n°3"></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label class="form-label required">Montant à réviser (DH)</label><input type="number" step="0.01" class="form-control" name="montant_base" placeholder="0"></div>
+                <div class="form-group"><label class="form-label">Mois de révision</label><input type="month" class="form-control" name="mois_revision"></div>
+            </div>
+            <div class="d-flex justify-between align-center">
+                <label class="form-label" style="margin:0;">Valeurs actuelles des index</label>
+                <button type="button" class="btn btn-ghost btn-sm" onclick="autofillCalculFromIndex()"><i data-lucide="wand-2"></i> Auto-remplir (base d'index)</button>
+            </div>
+            <div id="calc-termes" class="mt-sm"></div>
+            <div id="calc-result" class="mt-md"></div>
+        </form>`;
+    openModal('Calcul de révision', body, `<button class="btn btn-ghost" onclick="closeModal()">Fermer</button><button class="btn btn-primary" onclick="submitCalcul(${projetId})">Calculer &amp; enregistrer</button>`, 'lg');
+    renderCalculTermes();
+    if (window.lucide) lucide.createIcons();
+}
+function renderCalculTermes() {
+    const sel = document.getElementById('calc-formule'); const c = document.getElementById('calc-termes'); if (!sel || !c) return;
+    const f = (window._revFormules || []).find(x => x.id === parseInt(sel.value));
+    if (!f) { c.innerHTML = ''; return; }
+    c.innerHTML = (f.termes || []).map(t => `<div class="form-row"><div class="form-group"><label class="form-label">${t.index_nom} <span class="text-xs text-muted">(coeff ${t.coefficient} · base ${t.valeur_base})</span></label><input type="number" step="0.01" class="form-control calc-val" data-terme="${t.id}" placeholder="valeur de l'index au mois de révision"></div></div>`).join('') || '<p class="text-xs text-muted">Formule sans terme (partie fixe seule → K = a).</p>';
+    if (window.lucide) lucide.createIcons({ node: c });
+}
+async function autofillCalculFromIndex() {
+    const f = document.getElementById('form-calcul');
+    const mois = f.mois_revision.value;
+    if (!mois) { showToast('Info', 'Renseignez d’abord le mois de révision.', 'info'); return; }
+    const formule = (window._revFormules || []).find(x => x.id === parseInt(document.getElementById('calc-formule').value));
+    if (!formule) return;
+    let filled = 0;
+    for (const t of (formule.termes || [])) {
+        const rows = await window.api.revision.getIndex(t.index_nom);
+        const hit = (rows || []).find(r => r.mois === mois);
+        if (hit) { const inp = f.querySelector(`.calc-val[data-terme="${t.id}"]`); if (inp) { inp.value = hit.valeur; filled++; } }
+    }
+    showToast(filled ? 'Auto-rempli' : 'Aucun index', filled ? `${filled} valeur(s) trouvée(s) pour ${mois}.` : `Aucun index pour ${mois} — saisissez-les dans la base d’index.`, filled ? 'success' : 'warning');
+}
+async function submitCalcul(projetId) {
+    const f = document.getElementById('form-calcul');
+    const formule_id = parseInt(document.getElementById('calc-formule').value);
+    const montant_base = parseFloat(f.montant_base.value) || 0;
+    if (!montant_base) { showToast('Erreur', 'Montant à réviser requis.', 'danger'); return; }
+    const valeurs = {}; f.querySelectorAll('.calc-val').forEach(i => { valeurs[i.dataset.terme] = i.value; });
+    const data = { formule_id, projet_id: projetId, montant_base, mois_revision: f.mois_revision.value || null, libelle: f.libelle.value || null, valeurs };
+    try {
+        const r = await window.api.revision.calculer(data);
+        if (r && r.success) {
+            document.getElementById('calc-result').innerHTML = `<div class="p-md" style="background:var(--bg-tertiary);border-radius:8px;">
+                <div class="d-flex justify-between"><span class="text-sm">Coefficient de révision K</span><strong>${r.coefficient_k}</strong></div>
+                <div class="d-flex justify-between mt-sm"><span class="text-sm">Montant révisé</span><strong class="text-info">${formatCurrency(r.montant_revise)}</strong></div>
+                <div class="d-flex justify-between mt-sm"><span class="text-sm">Écart de révision</span><strong class="${r.ecart >= 0 ? 'text-success' : 'text-danger'}">${r.ecart >= 0 ? '+' : ''}${formatCurrency(r.ecart)}</strong></div>
+            </div>`;
+            showToast('Calculé ✅', 'K = ' + r.coefficient_k, 'success');
+            renderRevision(document.getElementById('hub-rev'));
+        } else showToast('Erreur', (r && r.error) || 'Calcul impossible.', 'danger');
+    } catch (err) { showToast('Erreur', err.message, 'danger'); }
+}
+async function deleteRevisionCalcul(id) { if (!confirm('Supprimer ce calcul ?')) return; await window.api.revision.deleteCalcul(id); renderRevision(document.getElementById('hub-rev')); }
 
 async function renderOrdresService(container) {
     updatePageTitle('Ordres de Service');

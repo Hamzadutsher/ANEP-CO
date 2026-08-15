@@ -145,6 +145,12 @@
         checklist: {
             get: t => rpc('checklist:get', t), add: d => rpc('checklist:add', d), delete: id => rpc('checklist:delete', id)
         },
+        revision: {
+            getFormules: id => rpc('revision:getFormules', id), createFormule: d => rpc('revision:createFormule', d),
+            deleteFormule: id => rpc('revision:deleteFormule', id), calculer: d => rpc('revision:calculer', d),
+            getCalculs: id => rpc('revision:getCalculs', id), deleteCalcul: id => rpc('revision:deleteCalcul', id),
+            setIndex: d => rpc('revision:setIndex', d), getIndex: n => rpc('revision:getIndex', n), deleteIndex: id => rpc('revision:deleteIndex', id)
+        },
         essais: {
             getByOuvrage: id => rpc('essais:getByOuvrage', id), getEnCours: id => rpc('essais:getEnCours', id),
             create: d => rpc('essais:create', d), updateResultat: (id, d) => rpc('essais:updateResultat', id, d),

@@ -1178,6 +1178,79 @@ class AppDatabase {
         return this.run('INSERT INTO checklist_items (type_reception, libelle, ordre, actif) VALUES (?, ?, ?, 1)', [data.type_reception, data.libelle, (max || 0) + 1]);
     }
     deleteChecklistItem(id) { return this._deleteRow('checklist_items', id); }
+
+    // ============================================================
+    // RÉVISION DES PRIX — formules à indices (marchés publics)
+    // K = partie fixe + Σ [coefficient × (index actuel / index de base)]
+    // ============================================================
+    createRevisionFormule(data) {
+        const res = this.run(`INSERT INTO revision_formules (projet_id, lot_id, intitule, partie_fixe, mois_base)
+            VALUES (?, ?, ?, ?, ?)`,
+            [data.projet_id, data.lot_id || null, data.intitule, parseFloat(data.partie_fixe) || 0, data.mois_base || null]);
+        const fid = res.lastInsertRowid;
+        (data.termes || []).forEach(t => {
+            if (!t.index_nom) return;
+            this.run('INSERT INTO revision_termes (formule_id, index_nom, coefficient, valeur_base) VALUES (?, ?, ?, ?)',
+                [fid, t.index_nom, parseFloat(t.coefficient) || 0, parseFloat(t.valeur_base) || 0]);
+        });
+        this.logEvent({ acteur_type: 'MOD', action: 'Formule de révision créée', cible_type: 'revision', cible_id: fid, projet_id: data.projet_id, details: data.intitule });
+        return res;
+    }
+    getRevisionFormules(projetId) {
+        const formules = this.all('SELECT f.*, l.code_lot FROM revision_formules f LEFT JOIN lots l ON f.lot_id = l.id WHERE f.projet_id = ? ORDER BY f.id DESC', [projetId]);
+        return formules.map(f => ({ ...f, termes: this.getRevisionTermes(f.id) }));
+    }
+    getRevisionTermes(formuleId) { return this.all('SELECT * FROM revision_termes WHERE formule_id = ? ORDER BY id', [formuleId]); }
+    getRevisionFormule(id) { const f = this.get('SELECT * FROM revision_formules WHERE id = ?', [id]); if (f) f.termes = this.getRevisionTermes(id); return f; }
+    deleteRevisionFormule(id) {
+        this.run('DELETE FROM revision_termes WHERE formule_id = ?', [id]);
+        this.run('DELETE FROM revision_calculs WHERE formule_id = ?', [id]);
+        return this._deleteRow('revision_formules', id);
+    }
+    // Calcul de révision : valeurs = { terme_id: valeur_index_actuel }
+    createRevisionCalcul(data) {
+        const formule = this.getRevisionFormule(data.formule_id);
+        if (!formule) return { success: false, error: 'Formule introuvable.' };
+        const valeurs = data.valeurs || {};
+        let k = parseFloat(formule.partie_fixe) || 0;
+        const detail = { partie_fixe: k, termes: [] };
+        for (const t of formule.termes) {
+            // Valeur actuelle : saisie manuelle, sinon recherche dans la base d'index au mois de révision
+            let actuel = parseFloat(valeurs[t.id]);
+            if (isNaN(actuel) && data.mois_revision) { const v = this.getIndexValue(t.index_nom, data.mois_revision); if (v != null) actuel = parseFloat(v); }
+            // Valeur de base : celle de la formule, sinon recherche au mois de base
+            let base = parseFloat(t.valeur_base);
+            if ((!base || isNaN(base)) && formule.mois_base) { const v = this.getIndexValue(t.index_nom, formule.mois_base); if (v != null) base = parseFloat(v); }
+            const ratio = (base && !isNaN(actuel)) ? (actuel / base) : 1;
+            const contrib = (parseFloat(t.coefficient) || 0) * ratio;
+            k += contrib;
+            detail.termes.push({ index_nom: t.index_nom, coefficient: t.coefficient, valeur_base: base, valeur_actuelle: isNaN(actuel) ? null : actuel, ratio: Math.round(ratio * 10000) / 10000, contribution: Math.round(contrib * 10000) / 10000 });
+        }
+        k = Math.round(k * 10000) / 10000;
+        const montant = parseFloat(data.montant_base) || 0;
+        const montant_revise = Math.round(montant * k * 100) / 100;
+        const ecart = Math.round((montant_revise - montant) * 100) / 100;
+        const res = this.run(`INSERT INTO revision_calculs (formule_id, projet_id, decompte_id, libelle, mois_revision, montant_base, coefficient_k, montant_revise, ecart, detail)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [data.formule_id, formule.projet_id, data.decompte_id || null, data.libelle || null, data.mois_revision || null, montant, k, montant_revise, ecart, JSON.stringify(detail)]);
+        this.logEvent({ acteur_type: 'MOD', action: 'Révision de prix calculée', cible_type: 'revision', cible_id: res.lastInsertRowid, projet_id: formule.projet_id, details: `K=${k} · écart ${Math.round(ecart)} DH` });
+        return { success: true, id: res.lastInsertRowid, coefficient_k: k, montant_revise, ecart, detail };
+    }
+    getRevisionCalculs(projetId) {
+        return this.all('SELECT c.*, f.intitule as formule_nom FROM revision_calculs c JOIN revision_formules f ON c.formule_id = f.id WHERE c.projet_id = ? ORDER BY c.id DESC', [projetId]);
+    }
+    deleteRevisionCalcul(id) { return this._deleteRow('revision_calculs', id); }
+    // Base d'index (valeurs mensuelles) : sélection par date I0 (mois base) / I (mois révision)
+    setRevisionIndex(data) {
+        this.run('DELETE FROM revision_index WHERE index_nom = ? AND mois = ?', [data.index_nom, data.mois]);
+        return this.run('INSERT INTO revision_index (index_nom, mois, valeur, type) VALUES (?, ?, ?, ?)', [data.index_nom, data.mois, parseFloat(data.valeur) || 0, data.type || 'Définitif']);
+    }
+    getRevisionIndex(indexNom) {
+        if (indexNom) return this.all('SELECT * FROM revision_index WHERE index_nom = ? ORDER BY mois DESC', [indexNom]);
+        return this.all('SELECT * FROM revision_index ORDER BY index_nom, mois DESC');
+    }
+    getIndexValue(nom, mois) { return this.getScalar('SELECT valeur FROM revision_index WHERE index_nom = ? AND mois = ? LIMIT 1', [nom, mois]); }
+    deleteRevisionIndex(id) { return this._deleteRow('revision_index', id); }
     getDocument(id) { return this.get('SELECT * FROM documents WHERE id = ?', [id]); }
     getDocumentsByEntity(entiteType, entiteId) {
         return this.all('SELECT * FROM documents WHERE entite_type = ? AND entite_id = ? ORDER BY created_at DESC', [entiteType, entiteId]);

@@ -539,6 +539,50 @@ CREATE TABLE IF NOT EXISTS checklist_items (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Révision des prix : formules (partie fixe + termes à indices)
+CREATE TABLE IF NOT EXISTS revision_formules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    projet_id INTEGER NOT NULL,
+    lot_id INTEGER,
+    intitule TEXT NOT NULL,
+    partie_fixe REAL DEFAULT 0.15,
+    mois_base TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (projet_id) REFERENCES projets(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS revision_termes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    formule_id INTEGER NOT NULL,
+    index_nom TEXT NOT NULL,
+    coefficient REAL DEFAULT 0,
+    valeur_base REAL DEFAULT 0,
+    FOREIGN KEY (formule_id) REFERENCES revision_formules(id) ON DELETE CASCADE
+);
+-- Base d'index BTP (valeurs mensuelles officielles saisies par le MOD)
+CREATE TABLE IF NOT EXISTS revision_index (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    index_nom TEXT NOT NULL,
+    mois TEXT NOT NULL,
+    valeur REAL NOT NULL,
+    type TEXT DEFAULT 'Définitif' CHECK(type IN ('Provisoire', 'Définitif')),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS revision_calculs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    formule_id INTEGER NOT NULL,
+    projet_id INTEGER,
+    decompte_id INTEGER,
+    libelle TEXT,
+    mois_revision TEXT,
+    montant_base REAL DEFAULT 0,
+    coefficient_k REAL DEFAULT 1,
+    montant_revise REAL DEFAULT 0,
+    ecart REAL DEFAULT 0,
+    detail TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (formule_id) REFERENCES revision_formules(id) ON DELETE CASCADE
+);
+
 -- Journal météo (intempéries → arrêts/reprises dans les OS)
 CREATE TABLE IF NOT EXISTS meteo (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
