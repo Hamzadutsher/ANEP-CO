@@ -205,6 +205,7 @@
         meteo: {
             getByProjet: id => rpc('meteo:getByProjet', id), getStats: id => rpc('meteo:getStats', id),
             create: d => rpc('meteo:create', d), delete: id => rpc('meteo:delete', id), fetch: p => rpc('meteo:fetch', p),
+            fetchRange: p => rpc('meteo:fetchRange', p), forecast: p => rpc('meteo:forecast', p), getArretPeriodes: id => rpc('meteo:getArretPeriodes', id),
             openOfficial: () => { window.open('https://www.marocmeteo.ma/', '_blank'); return Promise.resolve({ success: true }); }
         },
         external: {

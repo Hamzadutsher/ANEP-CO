@@ -4417,12 +4417,17 @@ async function renderMeteo(container) {
     const projet = await window.api.projets.get(projetId);
     const entries = await window.api.meteo.getByProjet(projetId);
     const stats = await window.api.meteo.getStats(projetId);
+    const periodes = await window.api.meteo.getArretPeriodes(projetId);
+    const ville = (projet.wilaya || projet.localisation || 'Rabat');
+    window._meteoVille = ville;
+    window._meteoPeriodes = periodes;
 
     container.innerHTML = `
         <div class="page-header animate-fade-in-up">
-            <div><h2>Météo & Intempéries</h2><p>Suivi journalier — les jours d'intempéries alimentent les OS d'arrêt/prolongation</p></div>
+            <div><h2>Météo & Intempéries</h2><p>Indicateur clé du pilotage des OS d'arrêt/reprise et du délai</p></div>
             <div class="btn-group">
-                <button class="btn btn-secondary" onclick="captureMeteoAuto(${projetId}, '${(projet.wilaya || projet.localisation || 'Rabat').replace(/'/g, ' ')}')"><i data-lucide="cloud-download"></i> Capture auto (aujourd'hui)</button>
+                <button class="btn btn-ghost" onclick="captureMeteoAuto(${projetId}, '${ville.replace(/'/g, ' ')}')"><i data-lucide="cloud-download"></i> Aujourd'hui</button>
+                <button class="btn btn-secondary" onclick="showMeteoRangeModal(${projetId})"><i data-lucide="calendar-range"></i> Capturer une période</button>
                 <button class="btn btn-primary" onclick="showMeteoManualModal(${projetId})"><i data-lucide="plus"></i> Saisie manuelle</button>
             </div>
         </div>
@@ -4441,10 +4446,19 @@ async function renderMeteo(container) {
             <div class="stat-card stat-primary"><div class="stat-icon icon-primary"><i data-lucide="globe"></i></div><div class="stat-content"><button class="btn btn-ghost btn-sm mt-sm" onclick="window.api.meteo.openOfficial()"><i data-lucide="external-link"></i> marocmeteo.ma</button><div class="stat-label">Confirmation officielle</div></div></div>
         </div>
 
-        ${isM && stats.intemperies > 0 ? `<div class="card card-flat mb-lg animate-fade-in-up delay-2 d-flex justify-between align-center flex-wrap gap-md">
-            <div><span class="font-semibold">${stats.intemperies} jour(s) d'intempéries</span> <span class="text-sm text-muted">— générez un OS de prolongation pour récupérer ce délai.</span></div>
-            <button class="btn btn-secondary btn-sm" onclick="generateMeteoOS(${stats.intemperies})"><i data-lucide="file-plus"></i> Générer un OS de prolongation</button>
-        </div>` : ''}
+        <div class="d-flex gap-sm flex-wrap mb-lg animate-fade-in-up delay-2">
+            <button class="btn btn-ghost btn-sm" onclick="loadMeteoForecast(${projetId})"><i data-lucide="cloud-sun"></i> Prévisions 7 jours</button>
+            ${stats.intemperies > 0 ? `<button class="btn btn-ghost btn-sm" onclick="printMeteoConstat(${projetId})"><i data-lucide="printer"></i> Constat d'intempérie</button>
+            <button class="btn btn-ghost btn-sm" onclick="generateMeteoOS(${stats.intemperies})"><i data-lucide="file-plus"></i> OS de prolongation (${stats.intemperies} j)</button>` : ''}
+        </div>
+        <div id="meteo-forecast"></div>
+        ${isM && periodes.length ? `<div class="card mb-lg animate-fade-in-up delay-2"><div class="card-header"><h4><i data-lucide="cloud-rain-wind" style="width:18px;height:18px;margin-right:8px;"></i>Périodes d'arrêt détectées (${periodes.length})</h4></div><div class="card-body">
+            <p class="text-xs text-muted mb-sm">Jours d'intempérie consécutifs regroupés → générez l'OS d'arrêt + reprise daté (alimente l'axe de délai et les pénalités).</p>
+            ${periodes.map((pr, i) => `<div class="d-flex justify-between align-center flex-wrap gap-sm" style="padding:8px 0;border-bottom:1px solid var(--border-color);">
+                <div><span class="badge badge-danger">${pr.jours} j</span> <strong class="text-sm">${formatDate(pr.debut)}</strong> → <strong class="text-sm">${formatDate(pr.fin)}</strong> <span class="text-xs text-muted">· reprise le ${formatDate(pr.date_reprise)}</span></div>
+                <button class="btn btn-secondary btn-sm" onclick="generateArretOS(${i})"><i data-lucide="file-plus"></i> OS arrêt + reprise</button>
+            </div>`).join('')}
+        </div></div>` : ''}
 
         <div class="card animate-fade-in-up delay-2"><div class="card-body">
             ${entries.length > 0 ? `
@@ -4536,6 +4550,93 @@ function generateMeteoOS(jours) {
         objet: `Prolongation du délai pour intempéries (${jours} jour(s) d'arrêt constaté(s))`,
         motif: `Récupération des journées d'intempéries enregistrées dans le journal météo (${jours} jour(s)).`
     });
+}
+
+// Capture d'une période (plage de dates) depuis Open-Meteo
+function showMeteoRangeModal(projetId) {
+    const today = new Date().toISOString().split('T')[0];
+    const d7 = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0];
+    const body = `
+        <form id="form-meteo-range">
+            <p class="text-xs text-muted mb-sm">Récupère la météo de chaque jour de la période et l'enregistre (ville : <strong>${(window._meteoVille || 'Rabat')}</strong>). Les jours dépassant les seuils sont marqués « arrêt travaux ».</p>
+            <div class="form-row">
+                <div class="form-group"><label class="form-label required">Du</label><input type="date" class="form-control" name="start_date" value="${d7}" required></div>
+                <div class="form-group"><label class="form-label required">Au</label><input type="date" class="form-control" name="end_date" value="${today}" required></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label class="form-label">Seuil pluie (mm) → arrêt</label><input type="number" step="0.1" class="form-control" name="seuil_precip" value="15"></div>
+                <div class="form-group"><label class="form-label">Seuil vent (km/h) → arrêt</label><input type="number" class="form-control" name="seuil_vent" value="60"></div>
+            </div>
+        </form>`;
+    openModal('Capturer une période', body, `<button class="btn btn-ghost" onclick="closeModal()">Annuler</button><button class="btn btn-primary" onclick="submitMeteoRange(${projetId})">Capturer</button>`, 'lg');
+}
+async function submitMeteoRange(projetId) {
+    const f = document.getElementById('form-meteo-range');
+    const start_date = f.start_date.value, end_date = f.end_date.value;
+    if (!start_date || !end_date) { showToast('Erreur', 'Dates requises.', 'danger'); return; }
+    showToast('Capture en cours', 'Récupération de la période…', 'info');
+    const res = await window.api.meteo.fetchRange({ ville: window._meteoVille || 'Rabat', start_date, end_date, seuil_precip: parseFloat(f.seuil_precip.value) || 15, seuil_vent: parseFloat(f.seuil_vent.value) || 60 });
+    if (!res.success) { showToast('Capture impossible', res.error || 'Erreur', 'warning'); return; }
+    let n = 0, arrets = 0;
+    for (const d of res.days) { await window.api.meteo.create({ projet_id: projetId, date: d.date, condition: d.condition, temp_min: d.temp_min, temp_max: d.temp_max, precipitation_mm: d.precipitation_mm, vent_kmh: d.vent_kmh, arret_travaux: d.arret_travaux, source: 'Open-Meteo (période)', saisi_par_role: currentUser.role }); n++; if (d.arret_travaux) arrets++; }
+    closeModal();
+    showToast('Période capturée', `${n} jour(s) enregistré(s), dont ${arrets} en intempérie.`, 'success');
+    navigateTo('meteo');
+}
+async function loadMeteoForecast(projetId) {
+    const c = document.getElementById('meteo-forecast'); if (!c) return;
+    c.innerHTML = '<div class="card mb-lg"><div class="card-body text-sm text-muted">Chargement des prévisions…</div></div>';
+    const res = await window.api.meteo.forecast({ ville: window._meteoVille || 'Rabat' });
+    if (!res.success) { c.innerHTML = `<div class="card mb-lg"><div class="card-body text-sm text-warning">${res.error || 'Prévisions indisponibles.'}</div></div>`; return; }
+    c.innerHTML = `<div class="card mb-lg animate-fade-in-up"><div class="card-header"><h4><i data-lucide="cloud-sun" style="width:18px;height:18px;margin-right:8px;"></i>Prévisions 7 jours — ${res.ville}</h4></div><div class="card-body"><div class="d-flex gap-md flex-wrap">
+        ${res.days.map(d => `<div class="text-center p-sm" style="border:1px solid var(--border-color);border-radius:8px;min-width:92px;${d.arret_travaux ? 'border-color:var(--danger);' : ''}">
+            <div class="text-xs text-muted">${formatDate(d.date)}</div>
+            <div style="font-size:22px;">${meteoEmoji(d.condition)}</div>
+            <div class="text-xs">${Math.round(d.temp_min)}°/${Math.round(d.temp_max)}°</div>
+            <div class="text-xs ${d.precipitation_mm >= 15 ? 'text-danger font-bold' : 'text-muted'}">${d.precipitation_mm} mm</div>
+            ${d.arret_travaux ? '<div class="badge badge-danger" style="margin-top:4px;">arrêt</div>' : ''}
+        </div>`).join('')}
+    </div></div></div>`;
+    if (window.lucide) lucide.createIcons({ node: c });
+}
+async function generateArretOS(index) {
+    const pr = (window._meteoPeriodes || [])[index];
+    if (!pr) return;
+    const projetId = window._meteoProjet;
+    const lots = await window.api.lots.getByProjet(projetId);
+    if (!lots.length) { showToast('Info', 'Aucun lot sur ce projet.', 'info'); return; }
+    const body = `
+        <div class="mb-md text-sm">Période d'arrêt : <strong>${formatDate(pr.debut)} → ${formatDate(pr.fin)}</strong> (${pr.jours} j) · reprise le <strong>${formatDate(pr.date_reprise)}</strong>.<br>Deux OS seront créés (arrêt + reprise) sur le lot choisi.</div>
+        <div class="form-group"><label class="form-label required">Lot</label><select class="form-control" id="arret-lot">${lots.map(l => `<option value="${l.id}">${l.code_lot} — ${l.designation}</option>`).join('')}</select></div>
+        <div class="form-group"><label class="form-label">N° OS d'arrêt</label><input type="text" class="form-control" id="arret-num" value="OS-ARR-${pr.debut.replace(/-/g, '')}"></div>`;
+    openModal('Générer OS arrêt + reprise', body, `<button class="btn btn-ghost" onclick="closeModal()">Annuler</button><button class="btn btn-primary" onclick="submitArretOS(${index})">Créer les 2 OS</button>`, 'lg');
+}
+async function submitArretOS(index) {
+    const pr = (window._meteoPeriodes || [])[index]; if (!pr) return;
+    const lotId = parseInt(document.getElementById('arret-lot').value);
+    const num = (document.getElementById('arret-num').value || ('OS-ARR-' + pr.debut)).trim();
+    try {
+        await window.api.os.create({ lot_id: lotId, numero_os: num, type_os: 'Arrêt', objet: `Arrêt pour intempéries (${pr.jours} j)`, date_notification: pr.debut, date_effet: pr.debut, delai_jours: 0, date_fin_effet: pr.fin, motif: `Intempéries constatées du ${pr.debut} au ${pr.fin} (journal météo).` });
+        await window.api.os.create({ lot_id: lotId, numero_os: num + '-REP', type_os: 'Reprise', objet: 'Reprise des travaux après intempéries', date_notification: pr.date_reprise, date_effet: pr.date_reprise, delai_jours: 0, motif: `Reprise après la période d'arrêt du ${pr.debut} au ${pr.fin}.` });
+        closeModal();
+        showToast('OS créés ✅', 'Arrêt + reprise générés — l’axe de délai est mis à jour.', 'success');
+        navigateTo('meteo');
+    } catch (err) { showToast('Erreur', err.message, 'danger'); }
+}
+async function printMeteoConstat(projetId) {
+    const projet = await window.api.projets.get(projetId);
+    const entries = (await window.api.meteo.getByProjet(projetId)).filter(m => m.arret_travaux);
+    if (!entries.length) { showToast('Info', 'Aucune intempérie à constater.', 'info'); return; }
+    const rows = entries.sort((a, b) => a.date < b.date ? -1 : 1).map(m => `<tr><td>${m.date}</td><td>${m.condition || ''}</td><td>${m.precipitation_mm || 0} mm</td><td>${Math.round(m.vent_kmh || 0)} km/h</td></tr>`).join('');
+    const html = `<h1 style="font-size:18px;">Constat d'intempéries</h1>
+        <p style="color:#555;font-size:12px;">Projet : ${projet.intitule} (${projet.code_projet}) · Ville : ${projet.wilaya || projet.localisation || ''} · Édité le ${new Date().toLocaleDateString('fr-FR')}</p>
+        <p style="font-size:13px;">Journées d'intempéries constatées : <strong>${entries.length}</strong> (source : Open-Meteo, à confirmer sur marocmeteo.ma).</p>
+        <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%;font-size:12px;">
+        <thead style="background:#eef2ff;"><tr><th>Date</th><th>Conditions</th><th>Précipitations</th><th>Vent</th></tr></thead>
+        <tbody>${rows}</tbody></table>
+        <p style="font-size:11px;color:#777;margin-top:16px;">Ce constat justifie les OS d'arrêt/reprise et la prolongation du délai contractuel.</p>`;
+    try { await window.api.docs.generate({ html, filename: 'constat_intemperies_' + projet.code_projet }); showToast('Généré', 'Constat d’intempéries (imprimable / PDF).', 'success'); }
+    catch (e) { showToast('Erreur', e.message, 'danger'); }
 }
 
 // ============================================================

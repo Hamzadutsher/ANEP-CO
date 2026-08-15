@@ -1318,6 +1318,20 @@ class AppDatabase {
         };
     }
     deleteMeteo(id) { return this._deleteRow('meteo', id); }
+    // Regroupe les jours d'intempérie consécutifs en périodes d'arrêt (→ OS arrêt/reprise datés)
+    getMeteoArretPeriodes(projetId) {
+        const rows = this.all("SELECT date, condition, precipitation_mm, vent_kmh FROM meteo WHERE projet_id = ? AND arret_travaux = 1 ORDER BY date", [projetId]);
+        const nextDay = d => { const x = new Date(d + 'T00:00:00Z'); x.setUTCDate(x.getUTCDate() + 1); return x.toISOString().slice(0, 10); };
+        const periods = []; let cur = null;
+        for (const r of rows) {
+            if (cur && nextDay(cur.fin) === r.date) { cur.fin = r.date; cur.jours++; cur.jours_detail.push(r); }
+            else { if (cur) periods.push(cur); cur = { debut: r.date, fin: r.date, jours: 1, jours_detail: [r] }; }
+        }
+        if (cur) periods.push(cur);
+        // date de reprise = lendemain du dernier jour d'arrêt
+        periods.forEach(p => { p.date_reprise = nextDay(p.fin); });
+        return periods;
+    }
 
     // ---- Interfaces / dépendances entre lots ----
     createInterface(data) {

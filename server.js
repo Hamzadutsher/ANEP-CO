@@ -235,6 +235,32 @@ const H = {
             return { success: true, data: { ville: name, date: d, condition: info.label, temp_min: dl.temperature_2m_min[0], temp_max: dl.temperature_2m_max[0], precipitation_mm: precip, vent_kmh: vent, arret_travaux: (info.arret || precip >= 15 || vent >= 60) ? 1 : 0, source: 'Open-Meteo (auto)' } };
         } catch (e) { return { success: false, error: 'Connexion internet requise. (' + e.message + ')' }; }
     },
+    'meteo:getArretPeriodes': a => db.getMeteoArretPeriodes(a[0]),
+    'meteo:fetchRange': async a => {
+        const { ville, start_date, end_date, seuil_precip, seuil_vent } = a[0] || {};
+        try {
+            const geo = await httpGetJson(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(ville || 'Rabat')}&count=1&country=MA&language=fr`);
+            if (!geo.results || !geo.results.length) return { success: false, error: `Ville « ${ville} » introuvable.` };
+            const { latitude, longitude, name } = geo.results[0];
+            const sp = seuil_precip != null ? seuil_precip : 15, sv = seuil_vent != null ? seuil_vent : 60;
+            const w = await httpGetJson(`https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&daily=weathercode,temperature_2m_max,temperature_2m_min,precipitation_sum,windspeed_10m_max&timezone=auto&start_date=${start_date}&end_date=${end_date}`);
+            const dl = w.daily; if (!dl || !dl.time || !dl.time.length) return { success: false, error: 'Données indisponibles pour cette période.' };
+            const days = dl.time.map((t, i) => { const info = WMO[dl.weathercode[i]] || { label: 'Indéterminé', arret: false }; const precip = dl.precipitation_sum[i] || 0, vent = dl.windspeed_10m_max[i] || 0; return { date: t, condition: info.label, temp_min: dl.temperature_2m_min[i], temp_max: dl.temperature_2m_max[i], precipitation_mm: precip, vent_kmh: vent, arret_travaux: (info.arret || precip >= sp || vent >= sv) ? 1 : 0 }; });
+            return { success: true, ville: name, days };
+        } catch (e) { return { success: false, error: 'Connexion internet requise. (' + e.message + ')' }; }
+    },
+    'meteo:forecast': async a => {
+        const { ville } = a[0] || {};
+        try {
+            const geo = await httpGetJson(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(ville || 'Rabat')}&count=1&country=MA&language=fr`);
+            if (!geo.results || !geo.results.length) return { success: false, error: 'Ville introuvable.' };
+            const { latitude, longitude, name } = geo.results[0];
+            const w = await httpGetJson(`https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&daily=weathercode,temperature_2m_max,temperature_2m_min,precipitation_sum,windspeed_10m_max&timezone=auto&forecast_days=7`);
+            const dl = w.daily; if (!dl || !dl.time) return { success: false, error: 'Prévisions indisponibles.' };
+            const days = dl.time.map((t, i) => { const info = WMO[dl.weathercode[i]] || { label: 'Indéterminé', arret: false }; const precip = dl.precipitation_sum[i] || 0, vent = dl.windspeed_10m_max[i] || 0; return { date: t, condition: info.label, temp_min: dl.temperature_2m_min[i], temp_max: dl.temperature_2m_max[i], precipitation_mm: precip, vent_kmh: vent, arret_travaux: (info.arret || precip >= 15 || vent >= 60) ? 1 : 0 }; });
+            return { success: true, ville: name, days };
+        } catch (e) { return { success: false, error: 'Connexion internet requise. (' + e.message + ')' }; }
+    },
     'hqse:getByProjet': a => db.getHqseByProjet(a[0]),
     'hqse:getStats': a => db.getHqseStats(a[0]),
     'hqse:create': a => db.createHqse(a[0]),

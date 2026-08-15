@@ -271,6 +271,9 @@ contextBridge.exposeInMainWorld('api', {
         create: (data) => ipcRenderer.invoke('meteo:create', data),
         delete: (id) => ipcRenderer.invoke('meteo:delete', id),
         fetch: (params) => ipcRenderer.invoke('meteo:fetch', params),
+        fetchRange: (params) => ipcRenderer.invoke('meteo:fetchRange', params),
+        forecast: (params) => ipcRenderer.invoke('meteo:forecast', params),
+        getArretPeriodes: (projetId) => ipcRenderer.invoke('meteo:getArretPeriodes', projetId),
         openOfficial: () => ipcRenderer.invoke('meteo:openOfficial')
     },
 
