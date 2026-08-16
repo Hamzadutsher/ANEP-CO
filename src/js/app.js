@@ -203,6 +203,24 @@ function clearActiveProjet() {
     navigateTo('dashboard');
 }
 
+// Recherche globale (barre de l'en-tête)
+async function globalSearch(q) {
+    if (!q || q.trim().length < 2) { showToast('Recherche', 'Saisissez au moins 2 caractères.', 'info'); return; }
+    let r;
+    try { r = await window.api.search.global(q.trim()); } catch (e) { showToast('Erreur', e.message, 'danger'); return; }
+    const sections = [];
+    const sec = (title, items, render) => { if (items && items.length) sections.push(`<div class="mb-md"><div class="text-xs text-muted mb-sm" style="text-transform:uppercase;letter-spacing:.04em;">${title} (${items.length})</div>${items.map(render).join('')}</div>`); };
+    const row = (icon, main, sub, onclick) => `<div class="d-flex align-center gap-sm" style="padding:7px 4px;border-bottom:1px solid var(--border-color);cursor:pointer;" onclick="closeModal();${onclick}"><i data-lucide="${icon}" style="width:16px;height:16px;flex:none;"></i><div style="min-width:0;"><div class="text-sm font-medium">${main}</div>${sub ? `<div class="text-xs text-muted">${sub}</div>` : ''}</div></div>`;
+    sec('Projets', r.projets, p => row('building-2', p.intitule, p.code_projet, `setActiveProjet(${p.id});navigateTo('project-detail',{id:${p.id}})`));
+    sec('Lots', r.lots, l => row('layers', l.code_lot + ' — ' + l.designation, '', `setActiveProjet(${l.projet_id});navigateTo('project-detail',{id:${l.projet_id}})`));
+    sec('Intervenants', r.intervenants, i => row('users', i.raison_sociale, i.type_role, `navigateTo('hub-acteurs')`));
+    sec('Ordres de service', r.os, o => row('file-text', o.numero_os, o.objet, `navigateTo('ordres-service')`));
+    sec('Décomptes', r.decomptes, d => row('receipt', d.numero, '', `navigateTo('paiements')`));
+    const body = sections.length ? sections.join('') : `<div class="empty-state p-md"><p class="text-muted text-sm">Aucun résultat pour « ${q} ».</p></div>`;
+    openModal('Résultats — « ' + q + ' »', body, '<button class="btn btn-ghost" onclick="closeModal()">Fermer</button>', 'lg');
+    if (window.lucide) lucide.createIcons();
+}
+
 async function renderMODDashboard(container) {
     updatePageTitle('Dashboard');
     
@@ -280,6 +298,25 @@ async function renderMODDashboard(container) {
                 <div class="stat-content">
                     <div class="stat-value">${stats.totalIntervenants}</div>
                     <div class="stat-label">Intervenants</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Cockpit : points d'attention (modules) -->
+        <div class="card mt-lg animate-fade-in-up delay-2">
+            <div class="card-header"><h4><i data-lucide="bell-ring" style="width:18px;height:18px;margin-right:8px;"></i>Points d'attention</h4></div>
+            <div class="card-body">
+                <div class="d-flex gap-sm flex-wrap">
+                    ${[
+                        ['reservesOuvertes', 'Réserves ouvertes', 'hub-suivi', 'badge-warning'],
+                        ['planReservesOuvertes', 'Réserves sur plan', 'hub-terrain', 'badge-warning'],
+                        ['signalementsOuverts', 'Signalements', 'hub-terrain', 'badge-danger'],
+                        ['essaisEnAttente', 'Essais en attente', 'hub-suivi', 'badge-info'],
+                        ['decomptesCircuit', 'Décomptes en circuit', 'paiements', 'badge-info'],
+                        ['avenantsProposes', 'Avenants à approuver', 'hub-budget', 'badge-warning'],
+                        ['intemperies', "Jours d'intempérie", 'hub-planning', 'badge-danger'],
+                        ['gpaDesordresOuverts', 'Désordres GPA', 'hub-budget', 'badge-danger']
+                    ].filter(x => stats[x[0]] > 0).map(x => `<button class="btn btn-ghost btn-sm" onclick="navigateTo('${x[2]}')"><span class="badge ${x[3]}">${stats[x[0]]}</span> ${x[1]}</button>`).join('') || '<span class="text-muted text-sm">✅ Rien à signaler pour le moment.</span>'}
                 </div>
             </div>
         </div>

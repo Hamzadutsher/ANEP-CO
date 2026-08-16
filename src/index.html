@@ -100,7 +100,7 @@
                 <div class="header-right">
                     <div class="header-search">
                         <span class="search-icon"><i data-lucide="search"></i></span>
-                        <input type="text" placeholder="Rechercher..." id="global-search">
+                        <input type="text" placeholder="Rechercher (projet, lot, OS, décompte…)" id="global-search" onkeydown="if(event.key==='Enter'){event.preventDefault();globalSearch(this.value);}">
                     </div>
                     <div id="header-weather" class="header-weather" style="display:none;" title="Météo du chantier" onclick="navigateTo('meteo')"></div>
                     <button class="notif-btn" id="btn-notifications" onclick="toggleNotifications()">

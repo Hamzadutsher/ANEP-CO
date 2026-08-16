@@ -286,6 +286,7 @@ function setupIPC() {
 
     // ---- Dashboard ----
     ipcMain.handle('dashboard:getStats', () => db.getDashboardStats());
+    ipcMain.handle('search:global', (event, q) => db.search(q));
 
     // ---- External ----
     ipcMain.handle('external:openEmail', (event, { to, subject, body }) => {

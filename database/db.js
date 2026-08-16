@@ -940,14 +940,16 @@ class AppDatabase {
     // Export de toutes les tables (pour CSV) — sessions sans mots de passe
     exportData() {
         const out = {};
-        const tables = ['projets', 'lots', 'intervenants', 'intervenants_projet', 'ouvrages',
-            'workflow_etapes', 'avis', 'reserves', 'ordres_service', 'essais_labo',
-            'reunions', 'invitations', 'evenements'];
-        for (const t of tables) {
-            try { out[t] = this.all('SELECT * FROM ' + t); } catch (e) { out[t] = []; }
+        // Export dynamique de TOUTES les tables (couvre les modules ajoutés), hors mots de passe
+        let names = [];
+        try { names = this.all("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").map(r => r.name); } catch (e) { names = []; }
+        for (const t of names) {
+            try {
+                if (t === 'sessions') { out[t] = this.all('SELECT id, intervenant_id, projet_id, username, actif, derniere_connexion, date_creation FROM sessions'); }
+                else if (t === 'mod_users') { out[t] = this.all('SELECT id, nom, fonction, username, actif, derniere_connexion, date_creation FROM mod_users'); }
+                else { out[t] = this.all('SELECT * FROM ' + t); }
+            } catch (e) { out[t] = []; }
         }
-        // Sessions sans le hash de mot de passe
-        out['sessions'] = this.all('SELECT id, intervenant_id, projet_id, username, actif, derniere_connexion, date_creation FROM sessions');
         return out;
     }
 
@@ -964,17 +966,39 @@ class AppDatabase {
     // ---- Dashboard Stats ----
 
     getDashboardStats() {
+        const s = (sql) => { try { return this.getScalar(sql) || 0; } catch (e) { return 0; } };
         return {
-            totalProjets: this.getScalar('SELECT COUNT(*) FROM projets'),
-            projetsEnCours: this.getScalar("SELECT COUNT(*) FROM projets WHERE statut = 'En cours'"),
-            totalLots: this.getScalar('SELECT COUNT(*) FROM lots'),
-            lotsEnCours: this.getScalar("SELECT COUNT(*) FROM lots WHERE statut = 'En cours'"),
-            totalIntervenants: this.getScalar('SELECT COUNT(*) FROM intervenants WHERE id > 0'),
-            reservesOuvertes: this.getScalar("SELECT COUNT(*) FROM reserves WHERE statut IN ('Ouverte', 'En cours de levée')"),
-            essaisEnAttente: this.getScalar("SELECT COUNT(*) FROM essais_labo WHERE conformite = 'En attente' OR conformite IS NULL"),
-            montantTotal: this.getScalar('SELECT COALESCE(SUM(montant_marche), 0) FROM projets'),
-            avancementMoyen: this.getScalar("SELECT COALESCE(AVG(taux_avancement), 0) FROM projets WHERE statut = 'En cours'"),
-            alertes: this.getScalar("SELECT COUNT(*) FROM notifications WHERE lue = 0 AND destinataire_type = 'MOD'")
+            totalProjets: s('SELECT COUNT(*) FROM projets'),
+            projetsEnCours: s("SELECT COUNT(*) FROM projets WHERE statut = 'En cours'"),
+            totalLots: s('SELECT COUNT(*) FROM lots'),
+            lotsEnCours: s("SELECT COUNT(*) FROM lots WHERE statut = 'En cours'"),
+            totalIntervenants: s('SELECT COUNT(*) FROM intervenants WHERE id > 0'),
+            reservesOuvertes: s("SELECT COUNT(*) FROM reserves WHERE statut IN ('Ouverte', 'En cours de levée')"),
+            essaisEnAttente: s("SELECT COUNT(*) FROM essais_labo WHERE conformite = 'En attente' OR conformite IS NULL"),
+            montantTotal: s('SELECT COALESCE(SUM(montant_marche), 0) FROM projets'),
+            avancementMoyen: s("SELECT COALESCE(AVG(taux_avancement), 0) FROM projets WHERE statut = 'En cours'"),
+            alertes: s("SELECT COUNT(*) FROM notifications WHERE lue = 0 AND destinataire_type = 'MOD'"),
+            // Points d'attention (modules ajoutés) — cockpit
+            signalementsOuverts: s("SELECT COUNT(*) FROM signalements WHERE statut != 'Traité'"),
+            planReservesOuvertes: s("SELECT COUNT(*) FROM plan_pins WHERE statut = 'Ouvert'"),
+            avenantsProposes: s("SELECT COUNT(*) FROM avenants WHERE statut = 'Proposé'"),
+            decomptesCircuit: s("SELECT COUNT(*) FROM decomptes WHERE statut NOT IN ('Payé','Rejeté')"),
+            intemperies: s("SELECT COUNT(*) FROM meteo WHERE arret_travaux = 1"),
+            gpaDesordresOuverts: s("SELECT COUNT(*) FROM gpa_desordres WHERE statut = 'Ouvert'")
+        };
+    }
+
+    // Recherche globale (barre de l'en-tête)
+    search(q) {
+        if (!q || q.trim().length < 2) return { projets: [], lots: [], intervenants: [], os: [], decomptes: [] };
+        const like = '%' + q.trim() + '%';
+        const safe = (sql, params) => { try { return this.all(sql, params); } catch (e) { return []; } };
+        return {
+            projets: safe('SELECT id, code_projet, intitule FROM projets WHERE intitule LIKE ? OR code_projet LIKE ? LIMIT 8', [like, like]),
+            lots: safe('SELECT l.id, l.code_lot, l.designation, l.projet_id FROM lots l WHERE l.code_lot LIKE ? OR l.designation LIKE ? LIMIT 8', [like, like]),
+            intervenants: safe('SELECT id, raison_sociale, type_role FROM intervenants WHERE raison_sociale LIKE ? AND id > 0 LIMIT 8', [like]),
+            os: safe('SELECT os.id, os.numero_os, os.objet, l.projet_id FROM ordres_service os JOIN lots l ON os.lot_id = l.id WHERE os.numero_os LIKE ? OR os.objet LIKE ? LIMIT 8', [like, like]),
+            decomptes: safe('SELECT id, numero, projet_id FROM decomptes WHERE numero LIKE ? LIMIT 8', [like])
         };
     }
 
@@ -1029,6 +1053,29 @@ class AppDatabase {
         this.run('DELETE FROM intervenants_projet WHERE projet_id = ?', [id]);
         this.run('DELETE FROM sessions WHERE projet_id = ?', [id]);
         this.run('DELETE FROM notifications WHERE projet_id = ?', [id]);
+        // Nettoyage des modules ajoutés (cascade manuelle, sql.js ne l'assure pas)
+        const tryRun = (sql) => { try { this.run(sql, [id]); } catch (e) {} };
+        tryRun('DELETE FROM decompte_circuit WHERE decompte_id IN (SELECT id FROM decomptes WHERE projet_id = ?)');
+        tryRun('DELETE FROM decomptes WHERE projet_id = ?');
+        tryRun('DELETE FROM attachements WHERE projet_id = ?');
+        tryRun('DELETE FROM avenants WHERE projet_id = ?');
+        tryRun('DELETE FROM gpa_desordres WHERE gpa_id IN (SELECT id FROM gpa WHERE projet_id = ?)');
+        tryRun('DELETE FROM gpa WHERE projet_id = ?');
+        tryRun('DELETE FROM revision_termes WHERE formule_id IN (SELECT id FROM revision_formules WHERE projet_id = ?)');
+        tryRun('DELETE FROM revision_calculs WHERE projet_id = ?');
+        tryRun('DELETE FROM revision_formules WHERE projet_id = ?');
+        tryRun('DELETE FROM penalites WHERE projet_id = ?');
+        tryRun('DELETE FROM plan_pins WHERE projet_id = ?');
+        tryRun('DELETE FROM signalements WHERE projet_id = ?');
+        tryRun('DELETE FROM constats WHERE projet_id = ?');
+        tryRun('DELETE FROM lot_interfaces WHERE projet_id = ?');
+        tryRun('DELETE FROM meteo WHERE projet_id = ?');
+        tryRun('DELETE FROM documents WHERE projet_id = ?');
+        tryRun('DELETE FROM permanences WHERE projet_id = ?');
+        tryRun('DELETE FROM cr_actions WHERE cr_id IN (SELECT id FROM comptes_rendus WHERE projet_id = ?)');
+        tryRun('DELETE FROM comptes_rendus WHERE projet_id = ?');
+        tryRun('DELETE FROM hqse WHERE projet_id = ?');
+        tryRun('DELETE FROM evenements WHERE projet_id = ?');
         const r = this.run('DELETE FROM projets WHERE id = ?', [id]);
         this.logEvent({ acteur_type: 'MOD', action: 'Suppression projet', cible_type: 'projet', cible_id: id });
         return { success: r.changes > 0 };

@@ -204,6 +204,9 @@ contextBridge.exposeInMainWorld('api', {
     dashboard: {
         getStats: () => ipcRenderer.invoke('dashboard:getStats')
     },
+    search: {
+        global: (q) => ipcRenderer.invoke('search:global', q)
+    },
 
     // External
     external: {

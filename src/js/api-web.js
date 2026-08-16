@@ -169,6 +169,7 @@
             unreadCount: (r, i) => rpc('notifications:unreadCount', r, i), create: d => rpc('notifications:create', d)
         },
         dashboard: { getStats: () => rpc('dashboard:getStats') },
+        search: { global: q => rpc('search:global', q) },
         interfaces: {
             getByProjet: id => rpc('interfaces:getByProjet', id), getStats: id => rpc('interfaces:getStats', id),
             create: d => rpc('interfaces:create', d), updateStatut: (id, s) => rpc('interfaces:updateStatut', id, s), delete: id => rpc('interfaces:delete', id)

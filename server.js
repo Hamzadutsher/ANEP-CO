@@ -211,6 +211,7 @@ const H = {
     'notifications:unreadCount': a => db.getUnreadCount(a[0], a[1]),
     'notifications:create': a => db.createNotification(a[0]),
     'dashboard:getStats': () => db.getDashboardStats(),
+    'search:global': a => db.search(a[0]),
     'events:get': a => db.getEvenements(a[0]),
     'interfaces:getByProjet': a => db.getInterfacesByProjet(a[0]),
     'interfaces:getStats': a => db.getInterfaceStats(a[0]),
