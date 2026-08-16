@@ -105,6 +105,11 @@ async function showApp() {
     // Navigate to dashboard
     navigateTo('dashboard');
 
+    // Sécurité : forcer le changement de mot de passe à la 1re connexion
+    if (currentUser && currentUser.must_change_pwd && typeof showForcedPasswordChange === 'function') {
+        setTimeout(() => showForcedPasswordChange(), 500);
+    }
+
     // Widget météo dans l'en-tête (chargement en arrière-plan)
     if (typeof updateHeaderWeather === 'function') updateHeaderWeather();
 

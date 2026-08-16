@@ -93,6 +93,8 @@ class AppDatabase {
         this._ensureColumn('attachements', 'motif_rectification', 'TEXT');
         // Liaison forte entre OS de différents lots (maîtrise du chevauchement)
         this._ensureColumn('ordres_service', 'os_lie_id', 'INTEGER');
+        // Sécurité : forçage du changement de mot de passe à la 1re connexion
+        this._ensureColumn('sessions', 'must_change_pwd', 'INTEGER DEFAULT 0');
     }
 
     // Auto-save after write operations
@@ -259,7 +261,7 @@ class AppDatabase {
         [
             [1, 'arch_bennani', 'arch2026'], [2, 'bet_betec', 'bet2026'], [3, 'bct_veritas', 'bct2026'],
             [4, 'labo_lpee', 'labo2026'], [5, 'topo_geotopo', 'topo2026'], [6, 'ent_tgcc', 'ent2026']
-        ].forEach(([iid, user, pwd]) => this.createSession({ intervenant_id: iid, projet_id: 1, username: user, password_hash: pwd }));
+        ].forEach(([iid, user, pwd]) => this.createSession({ intervenant_id: iid, projet_id: 1, username: user, password_hash: pwd, must_change_pwd: 0 }));
 
         // Insert demo notifications
         this.run(`INSERT INTO notifications (destinataire_type, destinataire_id, projet_id, titre, message, type_notif)
@@ -361,13 +363,22 @@ class AppDatabase {
 
     createSession(data) {
         const hash = this._hashPassword(data.password_hash);
-        return this.run(`INSERT INTO sessions (intervenant_id, projet_id, username, password_hash, actif)
-            VALUES (?, ?, ?, ?, 1)`, [data.intervenant_id, data.projet_id, data.username, hash]);
+        const mcp = data.must_change_pwd != null ? (data.must_change_pwd ? 1 : 0) : 1; // par défaut : forcer le changement
+        return this.run(`INSERT INTO sessions (intervenant_id, projet_id, username, password_hash, actif, must_change_pwd)
+            VALUES (?, ?, ?, ?, 1, ?)`, [data.intervenant_id, data.projet_id, data.username, hash, mcp]);
     }
 
-    // Met à jour (réinitialise) le mot de passe d'une session
+    // Met à jour (réinitialise) le mot de passe d'une session → force le changement à la prochaine connexion
     updateSessionPassword(id, newPassword) {
-        return this.run('UPDATE sessions SET password_hash = ? WHERE id = ?', [this._hashPassword(newPassword), id]);
+        return this.run('UPDATE sessions SET password_hash = ?, must_change_pwd = 1 WHERE id = ?', [this._hashPassword(newPassword), id]);
+    }
+    // Changement de mot de passe par l'intervenant lui-même (lève le forçage)
+    setOwnPassword(username, newPassword) {
+        const s = this.get('SELECT id FROM sessions WHERE username = ? AND actif = 1', [username]);
+        if (!s) return { success: false, error: 'Session introuvable.' };
+        this.run('UPDATE sessions SET password_hash = ?, must_change_pwd = 0 WHERE id = ?', [this._hashPassword(newPassword), s.id]);
+        this.logEvent({ acteur_type: 'Intervenant', action: 'Mot de passe modifié (self-service)', cible_type: 'session', cible_id: s.id });
+        return { success: true };
     }
 
     // ---- Équipe MOD (comptes nominatifs) ----
@@ -421,7 +432,7 @@ class AppDatabase {
             if (ok) {
                 this.run('UPDATE sessions SET derniere_connexion = CURRENT_TIMESTAMP WHERE id = ?', [session.id]);
                 this.logEvent({ acteur_type: session.type_role, acteur_id: session.intervenant_id, projet_id: session.projet_id, action: 'Connexion', cible_type: 'session', details: `Connexion ${session.raison_sociale}` });
-                return { role: session.type_role, intervenant_id: session.intervenant_id, projet_id: session.projet_id, raison_sociale: session.raison_sociale, contact_nom: session.contact_nom, avatar: session.avatar };
+                return { role: session.type_role, intervenant_id: session.intervenant_id, projet_id: session.projet_id, raison_sociale: session.raison_sociale, contact_nom: session.contact_nom, avatar: session.avatar, username: session.username, must_change_pwd: session.must_change_pwd ? 1 : 0 };
             }
         }
         return null;
@@ -986,6 +997,23 @@ class AppDatabase {
             intemperies: s("SELECT COUNT(*) FROM meteo WHERE arret_travaux = 1"),
             gpaDesordresOuverts: s("SELECT COUNT(*) FROM gpa_desordres WHERE statut = 'Ouvert'")
         };
+    }
+
+    // Échéances / alertes automatiques (dérivées, non stockées) — projetId optionnel (null = tous)
+    getEcheances(projetId) {
+        const out = [];
+        const where = projetId ? ' AND projet_id = ?' : '';
+        const p = projetId ? [projetId] : [];
+        const safe = (fn) => { try { fn(); } catch (e) {} };
+        safe(() => this.all(`SELECT g.date_fin_gpa, l.code_lot FROM gpa g LEFT JOIN lots l ON g.lot_id = l.id WHERE g.statut = 'En cours' AND g.date_fin_gpa IS NOT NULL AND g.date_fin_gpa <= date('now','+60 day')${projetId ? ' AND g.projet_id = ?' : ''}`, p).forEach(g => out.push({ type: 'GPA', severity: 'warning', label: `Fin de GPA ${g.code_lot || ''} le ${g.date_fin_gpa}`.replace('  ', ' '), date: g.date_fin_gpa })));
+        safe(() => { const n = this.getScalar(`SELECT COUNT(*) FROM decomptes WHERE statut NOT IN ('Payé','Rejeté')${where}`, p); if (n > 0) out.push({ type: 'Décompte', severity: 'info', label: `${n} décompte(s) en circuit de paiement`, date: null }); });
+        safe(() => { const n = this.getScalar(`SELECT COUNT(*) FROM signalements WHERE statut != 'Traité'${where}`, p); if (n > 0) out.push({ type: 'Signalement', severity: 'warning', label: `${n} signalement(s) non traité(s)`, date: null }); });
+        safe(() => { const n = this.getScalar(`SELECT COUNT(*) FROM avenants WHERE statut = 'Proposé'${where}`, p); if (n > 0) out.push({ type: 'Avenant', severity: 'info', label: `${n} avenant(s) à approuver`, date: null }); });
+        safe(() => { const n = this.getScalar(`SELECT COUNT(*) FROM gpa_desordres d JOIN gpa g ON d.gpa_id = g.id WHERE d.statut = 'Ouvert'${projetId ? ' AND g.projet_id = ?' : ''}`, p); if (n > 0) out.push({ type: 'GPA', severity: 'danger', label: `${n} désordre(s) GPA ouvert(s)`, date: null }); });
+        // Dépassements de délai (via l'axe de délai)
+        const projets = projetId ? [{ id: projetId }] : this.all('SELECT id FROM projets');
+        for (const pr of projets) safe(() => { const axis = this.getDelaiAxis(pr.id); (axis.lots || []).filter(l => l.hasData && l.enRetard).forEach(l => out.push({ type: 'Délai', severity: 'danger', label: `Lot ${l.code_lot} en dépassement de délai (${-l.restant} j, fin prévue ${l.finPrev})`, date: l.finPrev })); });
+        return out;
     }
 
     // Recherche globale (barre de l'en-tête)

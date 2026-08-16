@@ -203,6 +203,50 @@ function clearActiveProjet() {
     navigateTo('dashboard');
 }
 
+// Tiroir latéral mobile
+function toggleSidebar() { const s = document.getElementById('app-shell'); if (s) s.classList.toggle('nav-open'); }
+function closeSidebar() { const s = document.getElementById('app-shell'); if (s) s.classList.remove('nav-open'); }
+
+// ---- Sécurité : force du mot de passe + changement forcé ----
+function passwordStrength(pwd) {
+    pwd = pwd || '';
+    let score = 0;
+    if (pwd.length >= 8) score++;
+    if (pwd.length >= 12) score++;
+    if (/[A-Z]/.test(pwd) && /[a-z]/.test(pwd)) score++;
+    if (/[0-9]/.test(pwd)) score++;
+    if (/[^A-Za-z0-9]/.test(pwd)) score++;
+    const labels = ['Très faible', 'Faible', 'Moyen', 'Bon', 'Fort', 'Très fort'];
+    const colors = ['#c0392b', '#e67e22', '#f1c40f', '#27ae60', '#16a085', '#16a085'];
+    return { score, label: labels[score] || 'Très faible', color: colors[score] || '#c0392b', pct: Math.min(100, (score / 5) * 100) };
+}
+function updatePwdStrength(inputId, barId) {
+    const v = (document.getElementById(inputId) || {}).value || '';
+    const s = passwordStrength(v);
+    const bar = document.getElementById(barId);
+    if (bar) bar.innerHTML = `<div style="height:6px;background:var(--bg-tertiary);border-radius:3px;overflow:hidden;"><div style="height:100%;width:${s.pct}%;background:${s.color};transition:.2s;"></div></div><div class="text-xs" style="color:${s.color};margin-top:3px;">Force : ${s.label}</div>`;
+}
+function showForcedPasswordChange() {
+    const body = `
+        <div class="mb-md text-sm">🔒 Pour votre sécurité, définissez un nouveau mot de passe personnel avant de continuer.</div>
+        <div class="form-group"><label class="form-label required">Nouveau mot de passe</label><input type="password" class="form-control" id="fpc-new" oninput="updatePwdStrength('fpc-new','fpc-bar')" autocomplete="new-password"></div>
+        <div id="fpc-bar" class="mb-sm"></div>
+        <div class="form-group"><label class="form-label required">Confirmer</label><input type="password" class="form-control" id="fpc-confirm" autocomplete="new-password"></div>`;
+    openModal('Changement de mot de passe requis', body, `<button class="btn btn-primary" onclick="submitForcedPassword()"><i data-lucide="shield-check"></i> Enregistrer</button>`, 'lg');
+}
+async function submitForcedPassword() {
+    const p1 = (document.getElementById('fpc-new') || {}).value || '';
+    const p2 = (document.getElementById('fpc-confirm') || {}).value || '';
+    if (p1.length < 8) { showToast('Erreur', 'Au moins 8 caractères.', 'danger'); return; }
+    if (p1 !== p2) { showToast('Erreur', 'Les mots de passe ne correspondent pas.', 'danger'); return; }
+    if (passwordStrength(p1).score < 2) { showToast('Trop faible', 'Choisissez un mot de passe plus robuste (majuscules, chiffres, symboles).', 'warning'); return; }
+    try {
+        const res = await window.api.auth.setOwnPassword(currentUser.username, p1);
+        if (res && res.success) { currentUser.must_change_pwd = 0; closeModal(); showToast('Mot de passe mis à jour ✅', 'Merci, votre compte est sécurisé.', 'success'); }
+        else showToast('Erreur', (res && res.error) || 'Échec.', 'danger');
+    } catch (e) { showToast('Erreur', e.message, 'danger'); }
+}
+
 // Recherche globale (barre de l'en-tête)
 async function globalSearch(q) {
     if (!q || q.trim().length < 2) { showToast('Recherche', 'Saisissez au moins 2 caractères.', 'info'); return; }
@@ -227,6 +271,7 @@ async function renderMODDashboard(container) {
     const stats = await window.api.dashboard.getStats();
     const projets = await window.api.projets.getAll();
     const reservesOuvertes = await window.api.reserves.getOuvertes();
+    let echeances = []; try { echeances = await window.api.echeances.get(window._activeProjet || null); } catch (e) {}
     
     container.innerHTML = `
         <div class="page-header animate-fade-in-up">
@@ -320,6 +365,16 @@ async function renderMODDashboard(container) {
                 </div>
             </div>
         </div>
+
+        ${echeances.length ? `<div class="card mt-lg animate-fade-in-up delay-2" style="border-left:4px solid var(--warning);">
+            <div class="card-header"><h4><i data-lucide="alarm-clock" style="width:18px;height:18px;margin-right:8px;"></i>Échéances & alertes automatiques (${echeances.length})</h4></div>
+            <div class="card-body"><div class="d-flex flex-column gap-sm">
+                ${echeances.map(e => `<div class="d-flex align-center gap-sm" style="padding:5px 0;border-bottom:1px solid var(--border-color);">
+                    <span class="badge ${e.severity === 'danger' ? 'badge-danger' : (e.severity === 'warning' ? 'badge-warning' : 'badge-info')}">${e.type}</span>
+                    <span class="text-sm">${e.label}</span>
+                </div>`).join('')}
+            </div></div>
+        </div>` : ''}
 
         <!-- Content Grid -->
         <div class="content-grid-2">
@@ -3342,7 +3397,11 @@ async function renderReporting(container) {
     container.innerHTML = `
         <div class="page-header animate-fade-in-up">
             <div><h2>Reporting & Indicateurs</h2><p>Tableaux de bord pour le pilotage et le reportage hiérarchique</p></div>
-            <button class="btn btn-secondary" onclick="exportReport()"><i data-lucide="file-down"></i> Exporter le rapport</button>
+            <div class="btn-group">
+                <select class="form-control" id="report-projet" style="max-width:260px;">${projets.map(p => `<option value="${p.id}" ${p.id === window._activeProjet ? 'selected' : ''}>${p.code_projet} — ${p.intitule}</option>`).join('')}</select>
+                <button class="btn btn-primary" onclick="generateProjetSynthese(parseInt(document.getElementById('report-projet').value))"><i data-lucide="file-text"></i> Rapport du projet</button>
+                <button class="btn btn-ghost" onclick="exportReport()"><i data-lucide="file-down"></i> Global</button>
+            </div>
         </div>
 
         <div class="content-grid-2 animate-fade-in-up delay-1">
@@ -3500,6 +3559,69 @@ async function exportReport() {
     `);
     const res = await window.api.docs.generate({ html, filename: `Rapport_synthese_${new Date().toISOString().split('T')[0]}`, subdir: 'Rapports' });
     if (res.success) showToast('Rapport généré', 'Rapport ouvert. Ctrl+P pour imprimer ou enregistrer en PDF.', 'success');
+    else showToast('Erreur', res.error || 'Export impossible', 'danger');
+}
+
+// Rapport de synthèse complet d'UN projet (budget, délai, paiements, météo, réserves, photos)
+async function generateProjetSynthese(projetId) {
+    if (!projetId) { showToast('Erreur', 'Sélectionnez un projet.', 'danger'); return; }
+    showToast('Génération', 'Assemblage du rapport…', 'info');
+    const g = (p, d) => p.catch(() => d);
+    const projet = await window.api.projets.get(projetId);
+    const pstats = await g(window.api.projets.getStats(projetId), {});
+    const budget = await g(window.api.budget.get(projetId), null);
+    const axis = await g(window.api.timeline.axis(projetId), { lots: [] });
+    const lots = await g(window.api.lots.getByProjet(projetId), []);
+    const decStats = await g(window.api.decomptes.getStats(projetId), {});
+    const avenants = await g(window.api.avenants.getByProjet(projetId), []);
+    const gpa = await g(window.api.gpa.getByProjet(projetId), []);
+    const meteoStats = await g(window.api.meteo.getStats(projetId), {});
+    const reserves = await g(window.api.reserves.getOuvertes(projetId), []);
+    const signalements = await g(window.api.signalements.getByProjet(projetId), []);
+    const planStats = await g(window.api.planpins.stats(projetId), {});
+    let photos = []; try { photos = (await window.api.photos.getGallery({ projetId, limit: 6 })).filter(p => p.dataUrl); } catch (e) {}
+
+    const money = v => formatCurrency(v || 0);
+    const axeLots = (axis.lots || []).filter(l => l.hasData);
+    const budgetSection = budget ? `
+        <table class="doc-table" style="width:auto;">
+            <tr><th>Marché initial</th><td>${money(budget.marcheInitial)}</td><th>Avenants approuvés</th><td>${budget.avenantsApprouves >= 0 ? '+' : ''}${money(budget.avenantsApprouves)}</td></tr>
+            <tr><th>Marché révisé</th><td>${money(budget.marcheRevise)}</td><th>Payé</th><td>${money(budget.paye)}</td></tr>
+            <tr><th>Engagé</th><td>${money(budget.engage)} (${budget.pctEngage}%)</td><th>Reste à payer</th><td>${money(budget.resteAPayer)}</td></tr>
+        </table>
+        ${budget.depassement ? `<p style="color:#c0392b;font-weight:bold;">⚠ Dépassement du marché révisé de ${money(budget.depassementMontant)}</p>` : ''}` : '<p>Aucune donnée budgétaire.</p>';
+    const delaiRows = axeLots.length ? axeLots.map(l => `<tr><td>${l.code_lot}</td><td>${l.debut || '—'}</td><td>${l.delaiContractuel} j</td><td>${l.suspended} j</td><td>${l.finPrev || '—'}</td><td style="color:${l.restant < 0 ? '#c0392b' : '#27ae60'}">${l.resilie ? 'Résilié' : (l.restant < 0 ? ('Dépassé ' + (-l.restant) + ' j') : (l.restant + ' j'))}</td><td>${l.pct}%</td></tr>`).join('') : '<tr><td colspan="7" style="text-align:center">Aucun OS de commencement</td></tr>';
+    const reserveRows = reserves.length ? reserves.map(r => `<tr><td>${r.ouvrage_nom || ''}</td><td>${r.description || ''}</td><td>${r.gravite || ''}</td></tr>`).join('') : '<tr><td colspan="3" style="text-align:center">Aucune réserve ouverte</td></tr>';
+    const avApprouves = avenants.filter(a => a.statut === 'Approuvé');
+    const gpaEnCours = gpa.filter(gg => gg.statut === 'En cours');
+    let photosSection = '';
+    if (photos.length) photosSection = `<h3 style="color:#1a3a6b;margin-top:24px;">Illustration — chantier</h3><div style="display:flex;flex-wrap:wrap;gap:10px;">${photos.map(p => `<div style="width:31%;border:1px solid #d0d8e4;border-radius:6px;overflow:hidden;"><img src="${p.dataUrl}" style="width:100%;height:120px;object-fit:cover;display:block;"><div style="padding:5px 8px;font-size:10px;color:#5a7393;">${(p.categorie || '')} — ${p.description || p.nom}</div></div>`).join('')}</div>`;
+
+    const html = buildDocHtml(`Rapport de synthèse — ${projet.code_projet}`, `
+        <h1>Rapport de synthèse du projet</h1>
+        <p class="meta">${projet.intitule} · ${projet.code_projet} · ${projet.wilaya || projet.localisation || ''} · Édité le ${formatDate(new Date())}</p>
+        <table class="doc-table" style="width:auto;">
+            <tr><th>Maître d'ouvrage</th><td>${projet.maitre_ouvrage || ''}</td><th>Statut</th><td>${projet.statut}</td></tr>
+            <tr><th>Avancement</th><td>${projet.taux_avancement}%</td><th>Lots</th><td>${pstats.nbLots || lots.length}</td></tr>
+            <tr><th>Ouvrages</th><td>${pstats.ouvragesTermines || 0}/${pstats.nbOuvrages || 0} terminés</td><th>Réserves ouvertes</th><td>${reserves.length}</td></tr>
+        </table>
+        <h3 style="color:#1a3a6b;margin-top:24px;">Budget</h3>
+        ${budgetSection}
+        <h3 style="color:#1a3a6b;margin-top:24px;">Délais (axe de délai)</h3>
+        <table class="doc-table"><thead><tr><th>Lot</th><th>Début</th><th>Délai contract.</th><th>Arrêts</th><th>Fin prévue</th><th>Restant</th><th>% consommé</th></tr></thead><tbody>${delaiRows}</tbody></table>
+        <h3 style="color:#1a3a6b;margin-top:24px;">Paiements & modifications</h3>
+        <table class="doc-table" style="width:auto;">
+            <tr><th>Décomptes</th><td>${decStats.totalDecomptes || 0}</td><th>Mandaté</th><td>${money(decStats.montantMandate)}</td><th>Payé</th><td>${money(decStats.montantPaye)}</td></tr>
+            <tr><th>Avenants approuvés</th><td>${avApprouves.length}</td><th>GPA en cours</th><td>${gpaEnCours.length}</td><th>Signalements ouverts</th><td>${signalements.filter(s => s.statut !== 'Traité').length}</td></tr>
+        </table>
+        <h3 style="color:#1a3a6b;margin-top:24px;">Météo & intempéries</h3>
+        <p>Jours enregistrés : ${meteoStats.total || 0} · Jours d'intempéries (arrêt) : <strong>${meteoStats.intemperies || 0}</strong> · Réserves sur plan ouvertes : ${planStats.ouverts || 0}</p>
+        <h3 style="color:#1a3a6b;margin-top:24px;">Réserves ouvertes (${reserves.length})</h3>
+        <table class="doc-table"><thead><tr><th>Ouvrage</th><th>Description</th><th>Gravité</th></tr></thead><tbody>${reserveRows}</tbody></table>
+        ${photosSection}
+    `);
+    const res = await window.api.docs.generate({ html, filename: `Synthese_${projet.code_projet}_${new Date().toISOString().split('T')[0]}`, subdir: 'Rapports' });
+    if (res.success) showToast('Rapport généré', 'Ouvert. Ctrl+P pour imprimer / PDF.', 'success');
     else showToast('Erreur', res.error || 'Export impossible', 'danger');
 }
 

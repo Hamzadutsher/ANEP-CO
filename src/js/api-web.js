@@ -68,7 +68,8 @@
                 if (user && user._token) { _token = user._token; sessionStorage.setItem('anep_token', _token); delete user._token; }
                 return user;
             },
-            logout: async () => { try { await rpc('auth:logout'); } catch (e) {} _token = null; sessionStorage.removeItem('anep_token'); }
+            logout: async () => { try { await rpc('auth:logout'); } catch (e) {} _token = null; sessionStorage.removeItem('anep_token'); },
+            setOwnPassword: (u, p) => rpc('auth:setOwnPassword', u, p)
         },
         projets: {
             getAll: () => rpc('projets:getAll'), get: id => rpc('projets:get', id),
@@ -170,6 +171,7 @@
         },
         dashboard: { getStats: () => rpc('dashboard:getStats') },
         search: { global: q => rpc('search:global', q) },
+        echeances: { get: id => rpc('echeances:get', id) },
         interfaces: {
             getByProjet: id => rpc('interfaces:getByProjet', id), getStats: id => rpc('interfaces:getStats', id),
             create: d => rpc('interfaces:create', d), updateStatut: (id, s) => rpc('interfaces:updateStatut', id, s), delete: id => rpc('interfaces:delete', id)

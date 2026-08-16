@@ -175,6 +175,7 @@ function setActiveNav(pageId) {
 
 function navigateTo(pageId, params = {}) {
     currentPage = pageId;
+    if (typeof closeSidebar === 'function') closeSidebar();
     setActiveNav(pageId);
     const content = document.getElementById('page-content');
     content.innerHTML = '<div class="d-flex align-center justify-center h-full"><div class="spinner"></div></div>';

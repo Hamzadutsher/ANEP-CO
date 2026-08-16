@@ -89,12 +89,14 @@
                 </div>
             </div>
         </aside>
-        
+        <div id="sidebar-overlay" class="sidebar-overlay" onclick="closeSidebar()"></div>
+
         <!-- Main Content -->
         <main class="main-content">
             <!-- Header -->
             <header id="app-header" class="header">
                 <div class="header-left">
+                    <button class="mobile-nav-toggle" onclick="toggleSidebar()" aria-label="Menu"><i data-lucide="menu"></i></button>
                     <h1 id="page-title" class="header-title">Dashboard</h1>
                 </div>
                 <div class="header-right">

@@ -135,6 +135,7 @@ function setupIPC() {
     ipcMain.handle('auth:login', (event, username, password) => {
         return db.authenticate(username, password);
     });
+    ipcMain.handle('auth:setOwnPassword', (event, username, newPwd) => db.setOwnPassword(username, newPwd));
 
     // ---- Projets ----
     ipcMain.handle('projets:getAll', () => db.getAllProjets());
@@ -287,6 +288,7 @@ function setupIPC() {
     // ---- Dashboard ----
     ipcMain.handle('dashboard:getStats', () => db.getDashboardStats());
     ipcMain.handle('search:global', (event, q) => db.search(q));
+    ipcMain.handle('echeances:get', (event, projetId) => db.getEcheances(projetId));
 
     // ---- External ----
     ipcMain.handle('external:openEmail', (event, { to, subject, body }) => {

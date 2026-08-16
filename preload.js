@@ -3,7 +3,8 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('api', {
     // Authentication
     auth: {
-        login: (username, password) => ipcRenderer.invoke('auth:login', username, password)
+        login: (username, password) => ipcRenderer.invoke('auth:login', username, password),
+        setOwnPassword: (username, newPwd) => ipcRenderer.invoke('auth:setOwnPassword', username, newPwd)
     },
 
     // Projets
@@ -206,6 +207,9 @@ contextBridge.exposeInMainWorld('api', {
     },
     search: {
         global: (q) => ipcRenderer.invoke('search:global', q)
+    },
+    echeances: {
+        get: (projetId) => ipcRenderer.invoke('echeances:get', projetId)
     },
 
     // External
