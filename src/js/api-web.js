@@ -172,6 +172,7 @@
         dashboard: { getStats: () => rpc('dashboard:getStats') },
         search: { global: q => rpc('search:global', q) },
         echeances: { get: id => rpc('echeances:get', id) },
+        email: { send: p => rpc('email:send', p) },
         interfaces: {
             getByProjet: id => rpc('interfaces:getByProjet', id), getStats: id => rpc('interfaces:getStats', id),
             create: d => rpc('interfaces:create', d), updateStatut: (id, s) => rpc('interfaces:updateStatut', id, s), delete: id => rpc('interfaces:delete', id)

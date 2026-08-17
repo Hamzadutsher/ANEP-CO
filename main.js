@@ -136,6 +136,19 @@ function setupIPC() {
         return db.authenticate(username, password);
     });
     ipcMain.handle('auth:setOwnPassword', (event, username, newPwd) => db.setOwnPassword(username, newPwd));
+    ipcMain.handle('email:send', async (event, payload) => {
+        const { to, subject, text, html } = payload || {};
+        try {
+            const cfg = db.getConfig() || {};
+            const smtp = cfg.email || {};
+            if (!smtp.host || !smtp.user) return { success: false, fallback: true, error: 'SMTP non configuré.' };
+            const nodemailer = require('nodemailer');
+            const transport = nodemailer.createTransport({ host: smtp.host, port: parseInt(smtp.port) || 587, secure: !!smtp.secure, auth: { user: smtp.user, pass: smtp.pass } });
+            await transport.sendMail({ from: smtp.from || smtp.user, to, subject: subject || '(sans objet)', text: text || '', html: html || undefined });
+            db.logEvent({ acteur_type: 'MOD', action: 'E-mail envoyé', details: `${subject || ''} → ${to}` });
+            return { success: true };
+        } catch (e) { return { success: false, fallback: true, error: e.message }; }
+    });
 
     // ---- Projets ----
     ipcMain.handle('projets:getAll', () => db.getAllProjets());

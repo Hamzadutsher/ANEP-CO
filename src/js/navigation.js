@@ -95,7 +95,7 @@ Object.keys(ROLE_TASKS).forEach(role => {
 });
 
 // Modules optionnels dont l'accès intervenant est réglable par le MOD
-const OPTIONAL_MODULES = ['documentation', 'meteo', 'hqse'];
+const OPTIONAL_MODULES = ['documentation', 'permanence', 'meteo', 'hqse'];
 
 function isNavItemAllowed(role, itemId) {
     const s = window.appSettings || { modules: {}, perms: {} };

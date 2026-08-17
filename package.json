@@ -21,6 +21,7 @@
   "dependencies": {
     "bcryptjs": "^2.4.3",
     "express": "^4.21.2",
+    "nodemailer": "^6.9.16",
     "selfsigned": "^2.4.1",
     "sql.js": "^1.11.0"
   },

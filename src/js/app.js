@@ -247,6 +247,26 @@ async function submitForcedPassword() {
     } catch (e) { showToast('Erreur', e.message, 'danger'); }
 }
 
+// Notification e-mail : SMTP si configuré, sinon repli mailto (ouvre le client)
+async function sendEmailNotif(to, subject, body) {
+    if (!to) { showToast('Erreur', 'Destinataire manquant.', 'danger'); return; }
+    try {
+        const res = await window.api.email.send({ to, subject, text: body });
+        if (res && res.success) { showToast('E-mail envoyé ✅', 'Envoyé via le serveur SMTP.', 'success'); return; }
+    } catch (e) {}
+    const url = 'mailto:' + encodeURIComponent(to) + '?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body);
+    window.open(url, '_blank');
+    showToast('Client e-mail', 'SMTP non configuré → e-mail ouvert dans votre messagerie.', 'info');
+}
+async function emailEcheancesDigest(projetId) {
+    const to = prompt('Destinataire (e-mail) :', (currentUser && currentUser.email) || '');
+    if (!to) return;
+    let ech = [];
+    try { ech = await window.api.echeances.get(projetId || null); } catch (e) {}
+    const body = "Échéances & alertes ANEP MOD :\n\n" + (ech.length ? ech.map(e => `- [${e.type}] ${e.label}`).join('\n') : 'Aucune échéance en cours.') + "\n\n(Message généré par l'application ANEP MOD)";
+    sendEmailNotif(to, 'ANEP MOD — Échéances & alertes', body);
+}
+
 // Recherche globale (barre de l'en-tête)
 async function globalSearch(q) {
     if (!q || q.trim().length < 2) { showToast('Recherche', 'Saisissez au moins 2 caractères.', 'info'); return; }
@@ -367,7 +387,7 @@ async function renderMODDashboard(container) {
         </div>
 
         ${echeances.length ? `<div class="card mt-lg animate-fade-in-up delay-2" style="border-left:4px solid var(--warning);">
-            <div class="card-header"><h4><i data-lucide="alarm-clock" style="width:18px;height:18px;margin-right:8px;"></i>Échéances & alertes automatiques (${echeances.length})</h4></div>
+            <div class="card-header"><h4><i data-lucide="alarm-clock" style="width:18px;height:18px;margin-right:8px;"></i>Échéances & alertes automatiques (${echeances.length})</h4><button class="btn btn-ghost btn-sm" onclick="emailEcheancesDigest(window._activeProjet||null)"><i data-lucide="mail"></i> Envoyer par e-mail</button></div>
             <div class="card-body"><div class="d-flex flex-column gap-sm">
                 ${echeances.map(e => `<div class="d-flex align-center gap-sm" style="padding:5px 0;border-bottom:1px solid var(--border-color);">
                     <span class="badge ${e.severity === 'danger' ? 'badge-danger' : (e.severity === 'warning' ? 'badge-warning' : 'badge-info')}">${e.type}</span>
@@ -3579,6 +3599,9 @@ async function generateProjetSynthese(projetId) {
     const reserves = await g(window.api.reserves.getOuvertes(projetId), []);
     const signalements = await g(window.api.signalements.getByProjet(projetId), []);
     const planStats = await g(window.api.planpins.stats(projetId), {});
+    const decomptes = await g(window.api.decomptes.getByProjet(projetId), []);
+    const osList = await g(window.api.os.getByProjet(projetId), []);
+    const hqse = await g(window.api.hqse.getByProjet(projetId), []);
     let photos = []; try { photos = (await window.api.photos.getGallery({ projetId, limit: 6 })).filter(p => p.dataUrl); } catch (e) {}
 
     const money = v => formatCurrency(v || 0);
@@ -3594,6 +3617,11 @@ async function generateProjetSynthese(projetId) {
     const reserveRows = reserves.length ? reserves.map(r => `<tr><td>${r.ouvrage_nom || ''}</td><td>${r.description || ''}</td><td>${r.gravite || ''}</td></tr>`).join('') : '<tr><td colspan="3" style="text-align:center">Aucune réserve ouverte</td></tr>';
     const avApprouves = avenants.filter(a => a.statut === 'Approuvé');
     const gpaEnCours = gpa.filter(gg => gg.statut === 'En cours');
+    const lotsRows = lots.length ? lots.map(l => `<tr><td>${l.code_lot}</td><td>${l.designation || ''}</td><td>${l.statut || ''}</td><td>${l.taux_avancement || 0}%</td><td>${money(l.montant_marche || l.montant_lot)}</td></tr>`).join('') : '<tr><td colspan="5" style="text-align:center">—</td></tr>';
+    const decRows = decomptes.length ? decomptes.map(d => `<tr><td>${d.numero}</td><td>${d.code_lot || ''}</td><td>${money(d.montant_net_a_payer)}</td><td>${d.statut}</td><td>${d.phase_paiement || ''}</td></tr>`).join('') : '<tr><td colspan="5" style="text-align:center">Aucun décompte</td></tr>';
+    const avRows = avenants.length ? avenants.map(av => `<tr><td>${av.numero}</td><td>${av.objet || ''}</td><td>${av.montant_avenant >= 0 ? '+' : ''}${money(av.montant_avenant)}</td><td>${av.delai_jours || 0} j</td><td>${av.statut}</td></tr>`).join('') : '<tr><td colspan="5" style="text-align:center">Aucun avenant</td></tr>';
+    const osRows = osList.length ? osList.map(o => `<tr><td>${o.numero_os}</td><td>${o.code_lot || ''}</td><td>${o.type_os}</td><td>${o.objet || ''}</td><td>${o.date_effet || ''}</td></tr>`).join('') : '<tr><td colspan="5" style="text-align:center">Aucun OS</td></tr>';
+    const hqseRows = hqse.length ? hqse.slice(0, 12).map(h => `<tr><td>${h.type || h.categorie || h.nature || ''}</td><td>${h.description || h.intitule || h.objet || ''}</td><td>${h.criticite || h.niveau || h.gravite || ''}</td><td>${h.statut || ''}</td></tr>`).join('') : '';
     let photosSection = '';
     if (photos.length) photosSection = `<h3 style="color:#1a3a6b;margin-top:24px;">Illustration — chantier</h3><div style="display:flex;flex-wrap:wrap;gap:10px;">${photos.map(p => `<div style="width:31%;border:1px solid #d0d8e4;border-radius:6px;overflow:hidden;"><img src="${p.dataUrl}" style="width:100%;height:120px;object-fit:cover;display:block;"><div style="padding:5px 8px;font-size:10px;color:#5a7393;">${(p.categorie || '')} — ${p.description || p.nom}</div></div>`).join('')}</div>`;
 
@@ -3616,9 +3644,28 @@ async function generateProjetSynthese(projetId) {
         </table>
         <h3 style="color:#1a3a6b;margin-top:24px;">Météo & intempéries</h3>
         <p>Jours enregistrés : ${meteoStats.total || 0} · Jours d'intempéries (arrêt) : <strong>${meteoStats.intemperies || 0}</strong> · Réserves sur plan ouvertes : ${planStats.ouverts || 0}</p>
+        <h3 style="color:#1a3a6b;margin-top:24px;">Lots (${lots.length})</h3>
+        <table class="doc-table"><thead><tr><th>Code</th><th>Désignation</th><th>Statut</th><th>Avanc.</th><th>Montant</th></tr></thead><tbody>${lotsRows}</tbody></table>
+
+        <h3 style="color:#1a3a6b;margin-top:24px;">Décomptes (${decomptes.length})</h3>
+        <table class="doc-table"><thead><tr><th>N°</th><th>Lot</th><th>Net à payer</th><th>Statut</th><th>Phase</th></tr></thead><tbody>${decRows}</tbody></table>
+
+        <h3 style="color:#1a3a6b;margin-top:24px;">Avenants (${avenants.length})</h3>
+        <table class="doc-table"><thead><tr><th>N°</th><th>Objet</th><th>Montant</th><th>Délai</th><th>Statut</th></tr></thead><tbody>${avRows}</tbody></table>
+
+        <h3 style="color:#1a3a6b;margin-top:24px;">Ordres de service (${osList.length})</h3>
+        <table class="doc-table"><thead><tr><th>N°</th><th>Lot</th><th>Type</th><th>Objet</th><th>Effet</th></tr></thead><tbody>${osRows}</tbody></table>
+
+        ${hqseRows ? `<h3 style="color:#1a3a6b;margin-top:24px;">HQSE — risques & fiches</h3>
+        <table class="doc-table"><thead><tr><th>Type</th><th>Description</th><th>Criticité</th><th>Statut</th></tr></thead><tbody>${hqseRows}</tbody></table>` : ''}
+
         <h3 style="color:#1a3a6b;margin-top:24px;">Réserves ouvertes (${reserves.length})</h3>
         <table class="doc-table"><thead><tr><th>Ouvrage</th><th>Description</th><th>Gravité</th></tr></thead><tbody>${reserveRows}</tbody></table>
         ${photosSection}
+        <div style="margin-top:40px;display:flex;justify-content:space-between;">
+            <div style="text-align:center;font-size:11px;color:#5a7393;">Le Maître d'Ouvrage Délégué<br><br><br>_______________________</div>
+            <div style="text-align:center;font-size:11px;color:#5a7393;">Cachet et signature<br><br><br>_______________________</div>
+        </div>
     `);
     const res = await window.api.docs.generate({ html, filename: `Synthese_${projet.code_projet}_${new Date().toISOString().split('T')[0]}`, subdir: 'Rapports' });
     if (res.success) showToast('Rapport généré', 'Ouvert. Ctrl+P pour imprimer / PDF.', 'success');
@@ -5170,7 +5217,8 @@ async function renderParametres(container) {
     const s = await window.api.settings.get();
     window.appSettings = s;
     const roles = ['Architecte', 'BET', 'BCT', 'Laboratoire', 'Topographe', 'Entreprise'];
-    const modules = [{ id: 'documentation', label: 'Documentation & PV' }, { id: 'meteo', label: 'Météo' }, { id: 'hqse', label: 'HQSE' }];
+    const modules = [{ id: 'documentation', label: 'Documentation & PV' }, { id: 'permanence', label: 'Permanence' }, { id: 'meteo', label: 'Météo' }, { id: 'hqse', label: 'HQSE' }];
+    const em = s.email || {};
     const perm = (r, m) => !(s.perms && s.perms[r] && s.perms[r][m] === false); // défaut autorisé
     const attachAllowed = (r) => !!(s.perms && s.perms[r] && s.perms[r].attachements);
 
@@ -5210,7 +5258,26 @@ async function renderParametres(container) {
                 </div>
             </div>
         </div>
+
+        <div class="card mt-lg animate-fade-in-up delay-3">
+            <div class="card-header"><h4><i data-lucide="mail" style="width:18px;height:18px;margin-right:8px;"></i>Notifications e-mail (SMTP)</h4></div>
+            <div class="card-body">
+                <p class="text-xs text-muted mb-md">Configurez un serveur SMTP pour l'envoi automatique des e-mails. <strong>Sans configuration</strong>, les envois ouvrent votre logiciel de messagerie (mailto).</p>
+                <div class="form-row">
+                    <div class="form-group"><label class="form-label">Serveur SMTP (hôte)</label><input type="text" class="form-control" id="smtp-host" value="${(em.host || '').replace(/"/g, '&quot;')}" placeholder="smtp.gmail.com"></div>
+                    <div class="form-group"><label class="form-label">Port</label><input type="number" class="form-control" id="smtp-port" value="${em.port || 587}"></div>
+                    <div class="form-group"><label class="form-label">SSL/TLS</label><select class="form-control" id="smtp-secure"><option value="0" ${!em.secure ? 'selected' : ''}>Non (STARTTLS)</option><option value="1" ${em.secure ? 'selected' : ''}>Oui (SSL)</option></select></div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group"><label class="form-label">Utilisateur</label><input type="text" class="form-control" id="smtp-user" value="${(em.user || '').replace(/"/g, '&quot;')}" placeholder="compte@domaine.ma" autocomplete="off"></div>
+                    <div class="form-group"><label class="form-label">Mot de passe</label><input type="password" class="form-control" id="smtp-pass" value="${em.pass || ''}" placeholder="••••••••" autocomplete="new-password"></div>
+                    <div class="form-group"><label class="form-label">Expéditeur (From)</label><input type="text" class="form-control" id="smtp-from" value="${(em.from || '').replace(/"/g, '&quot;')}" placeholder="ANEP MOD <no-reply@anep.ma>"></div>
+                </div>
+                <button class="btn btn-ghost btn-sm" onclick="testSmtp()"><i data-lucide="send"></i> Envoyer un e-mail de test</button>
+            </div>
+        </div>
     `;
+    if (window.lucide) lucide.createIcons({ node: container });
 }
 
 async function saveParametres() {
@@ -5220,10 +5287,29 @@ async function saveParametres() {
         if (!cfg.perms[r]) cfg.perms[r] = {};
         cfg.perms[r][m] = box.checked;
     });
+    // Config SMTP
+    const host = (document.getElementById('smtp-host') || {}).value || '';
+    if (host || (document.getElementById('smtp-user') || {}).value) {
+        cfg.email = {
+            host, port: parseInt((document.getElementById('smtp-port') || {}).value) || 587,
+            secure: (document.getElementById('smtp-secure') || {}).value === '1',
+            user: (document.getElementById('smtp-user') || {}).value || '',
+            pass: (document.getElementById('smtp-pass') || {}).value || '',
+            from: (document.getElementById('smtp-from') || {}).value || ''
+        };
+    }
     await window.api.settings.set(cfg);
     window.appSettings = cfg;
-    buildNavigation(currentUser.role); // rafraîchir le menu MOD immédiatement
-    showToast('Enregistré', 'Droits et modules mis à jour. Les intervenants les verront à leur prochaine connexion.', 'success');
+    buildNavigation(currentUser.role);
+    showToast('Enregistré', 'Droits, modules et e-mail mis à jour.', 'success');
+}
+async function testSmtp() {
+    const to = prompt('Adresse e-mail de test :', (document.getElementById('smtp-user') || {}).value || '');
+    if (!to) return;
+    await saveParametres();
+    const res = await window.api.email.send({ to, subject: 'Test ANEP MOD', text: 'Ceci est un e-mail de test envoyé depuis ANEP MOD. Si vous le recevez, la configuration SMTP fonctionne.' });
+    if (res && res.success) showToast('E-mail envoyé ✅', 'Vérifiez la réception.', 'success');
+    else { showToast('Repli mailto', (res && res.error) || 'SMTP non configuré — ouverture du client e-mail.', 'warning'); const url = 'mailto:' + encodeURIComponent(to) + '?subject=Test%20ANEP%20MOD&body=Test'; window.open(url, '_blank'); }
 }
 
 // ============================================================

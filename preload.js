@@ -211,6 +211,9 @@ contextBridge.exposeInMainWorld('api', {
     echeances: {
         get: (projetId) => ipcRenderer.invoke('echeances:get', projetId)
     },
+    email: {
+        send: (payload) => ipcRenderer.invoke('email:send', payload)
+    },
 
     // External
     external: {
