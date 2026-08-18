@@ -1016,6 +1016,15 @@ class AppDatabase {
         return out;
     }
 
+    // E-mail de l'intervenant d'un rôle sur un projet (pour les notifications)
+    getRoleEmail(projetId, role) {
+        try {
+            const r = this.get(`SELECT i.email FROM intervenants i JOIN intervenants_projet ip ON i.id = ip.intervenant_id
+                WHERE ip.projet_id = ? AND i.type_role = ? AND i.email IS NOT NULL AND i.email != '' LIMIT 1`, [projetId, role]);
+            return r ? r.email : null;
+        } catch (e) { return null; }
+    }
+
     // Recherche globale (barre de l'en-tête)
     search(q) {
         if (!q || q.trim().length < 2) return { projets: [], lots: [], intervenants: [], os: [], decomptes: [] };
