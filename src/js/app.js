@@ -3419,8 +3419,9 @@ async function renderReporting(container) {
             <div><h2>Reporting & Indicateurs</h2><p>Tableaux de bord pour le pilotage et le reportage hiérarchique</p></div>
             <div class="btn-group">
                 <select class="form-control" id="report-projet" style="max-width:260px;">${projets.map(p => `<option value="${p.id}" ${p.id === window._activeProjet ? 'selected' : ''}>${p.code_projet} — ${p.intitule}</option>`).join('')}</select>
-                <button class="btn btn-primary" onclick="generateProjetSynthese(parseInt(document.getElementById('report-projet').value))"><i data-lucide="file-text"></i> Rapport du projet</button>
-                <button class="btn btn-ghost" onclick="exportReport()"><i data-lucide="file-down"></i> Global</button>
+                <button class="btn btn-primary" onclick="generateProjetSynthese(parseInt(document.getElementById('report-projet').value))"><i data-lucide="file-text"></i> Rapport (HTML)</button>
+                <button class="btn btn-secondary" onclick="downloadProjetSynthesePdf(parseInt(document.getElementById('report-projet').value))"><i data-lucide="file-down"></i> Télécharger PDF</button>
+                <button class="btn btn-ghost" onclick="exportReport()"><i data-lucide="globe"></i> Global</button>
             </div>
         </div>
 
@@ -3670,6 +3671,68 @@ async function generateProjetSynthese(projetId) {
     const res = await window.api.docs.generate({ html, filename: `Synthese_${projet.code_projet}_${new Date().toISOString().split('T')[0]}`, subdir: 'Rapports' });
     if (res.success) showToast('Rapport généré', 'Ouvert. Ctrl+P pour imprimer / PDF.', 'success');
     else showToast('Erreur', res.error || 'Export impossible', 'danger');
+}
+
+// Vrai PDF téléchargeable (jsPDF + autotable, côté navigateur — fiable sur petite instance)
+async function downloadProjetSynthesePdf(projetId) {
+    if (!projetId) { showToast('Erreur', 'Sélectionnez un projet.', 'danger'); return; }
+    if (!window.jspdf || !window.jspdf.jsPDF) { showToast('Erreur', 'Bibliothèque PDF indisponible.', 'danger'); return; }
+    showToast('Génération PDF', 'Construction du document…', 'info');
+    const g = (p, d) => p.catch(() => d);
+    const projet = await window.api.projets.get(projetId);
+    const pstats = await g(window.api.projets.getStats(projetId), {});
+    const budget = await g(window.api.budget.get(projetId), null);
+    const axis = await g(window.api.timeline.axis(projetId), { lots: [] });
+    const lots = await g(window.api.lots.getByProjet(projetId), []);
+    const decomptes = await g(window.api.decomptes.getByProjet(projetId), []);
+    const avenants = await g(window.api.avenants.getByProjet(projetId), []);
+    const osList = await g(window.api.os.getByProjet(projetId), []);
+    const reserves = await g(window.api.reserves.getOuvertes(projetId), []);
+    const gpa = await g(window.api.gpa.getByProjet(projetId), []);
+    const meteoStats = await g(window.api.meteo.getStats(projetId), {});
+    const decStats = await g(window.api.decomptes.getStats(projetId), {});
+
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+    const at = (opts) => { if (typeof doc.autoTable === 'function') doc.autoTable(opts); else if (window.jspdf.autoTable) window.jspdf.autoTable(doc, opts); };
+    const M = 40; let y = 48;
+    const money = v => formatCurrency(v || 0);
+    const h2 = (t) => { if (y > 770) { doc.addPage(); y = 48; } doc.setFontSize(12); doc.setTextColor(26, 58, 107); doc.text(t, M, y); y += 4; doc.setTextColor(40); };
+    const table = (head, body) => { at({ startY: y + 6, head: [head], body: body.length ? body : [['—']], margin: { left: M, right: M }, styles: { fontSize: 8, cellPadding: 3, overflow: 'linebreak' }, headStyles: { fillColor: [26, 58, 107] }, theme: 'grid' }); y = (doc.lastAutoTable ? doc.lastAutoTable.finalY : y + 40) + 14; };
+
+    doc.setFontSize(16); doc.setTextColor(26, 58, 107); doc.text('Rapport de synthèse — ' + projet.code_projet, M, y); y += 20;
+    doc.setFontSize(9); doc.setTextColor(90); doc.text(`${projet.intitule} · ${projet.wilaya || projet.localisation || ''} · Édité le ${formatDate(new Date())}`, M, y); y += 16; doc.setTextColor(40);
+
+    h2('Identité & avancement');
+    table(['Champ', 'Valeur'], [
+        ['Maître d\'ouvrage', projet.maitre_ouvrage || ''], ['Statut', projet.statut || ''],
+        ['Avancement', (projet.taux_avancement || 0) + ' %'], ['Lots', String(pstats.nbLots || lots.length)],
+        ['Ouvrages terminés', (pstats.ouvragesTermines || 0) + '/' + (pstats.nbOuvrages || 0)], ['Réserves ouvertes', String(reserves.length)]
+    ]);
+    if (budget) { h2('Budget'); table(['Poste', 'Montant'], [
+        ['Marché initial', money(budget.marcheInitial)], ['Avenants approuvés', (budget.avenantsApprouves >= 0 ? '+' : '') + money(budget.avenantsApprouves)],
+        ['Marché révisé', money(budget.marcheRevise)], ['Engagé', money(budget.engage) + ' (' + budget.pctEngage + '%)'],
+        ['Payé', money(budget.paye)], ['Reste à payer', money(budget.resteAPayer)]
+    ]); }
+    const axeLots = (axis.lots || []).filter(l => l.hasData);
+    if (axeLots.length) { h2('Délais (axe de délai)'); table(['Lot', 'Début', 'Délai', 'Arrêts', 'Fin prévue', 'Restant', '%'], axeLots.map(l => [l.code_lot, l.debut || '-', l.delaiContractuel + ' j', l.suspended + ' j', l.finPrev || '-', l.resilie ? 'Résilié' : (l.restant < 0 ? ('Dép. ' + (-l.restant) + 'j') : (l.restant + 'j')), l.pct + '%'])); }
+    if (lots.length) { h2('Lots'); table(['Code', 'Désignation', 'Statut', 'Avanc.', 'Montant'], lots.map(l => [l.code_lot, l.designation || '', l.statut || '', (l.taux_avancement || 0) + '%', money(l.montant_marche || l.montant_lot)])); }
+    if (decomptes.length) { h2('Décomptes'); table(['N°', 'Lot', 'Net à payer', 'Statut', 'Phase'], decomptes.map(d => [d.numero, d.code_lot || '', money(d.montant_net_a_payer), d.statut, d.phase_paiement || ''])); }
+    if (avenants.length) { h2('Avenants'); table(['N°', 'Objet', 'Montant', 'Délai', 'Statut'], avenants.map(av => [av.numero, av.objet || '', (av.montant_avenant >= 0 ? '+' : '') + money(av.montant_avenant), (av.delai_jours || 0) + 'j', av.statut])); }
+    if (osList.length) { h2('Ordres de service'); table(['N°', 'Lot', 'Type', 'Objet', 'Effet'], osList.map(o => [o.numero_os, o.code_lot || '', o.type_os, o.objet || '', o.date_effet || ''])); }
+    h2('Réserves ouvertes (' + reserves.length + ')');
+    table(['Ouvrage', 'Description', 'Gravité'], reserves.map(r => [r.ouvrage_nom || '', r.description || '', r.gravite || '']));
+    h2('Météo & garantie');
+    table(['Indicateur', 'Valeur'], [
+        ['Jours enregistrés', String(meteoStats.total || 0)], ['Jours d\'intempéries', String(meteoStats.intemperies || 0)],
+        ['GPA en cours', String(gpa.filter(x => x.statut === 'En cours').length)], ['Total payé', money(decStats.montantPaye)]
+    ]);
+    // Pied de page (numérotation)
+    const n = doc.internal.getNumberOfPages();
+    for (let i = 1; i <= n; i++) { doc.setPage(i); doc.setFontSize(8); doc.setTextColor(150); doc.text(`ANEP MOD — page ${i}/${n}`, M, 812); }
+
+    doc.save('Synthese_' + projet.code_projet + '_' + new Date().toISOString().split('T')[0] + '.pdf');
+    showToast('PDF téléchargé ✅', 'Rapport enregistré sur votre appareil.', 'success');
 }
 
 // ============================================================
@@ -5212,6 +5275,15 @@ function showPhotoLightbox(index) {
 // ============================================================
 // PARAMÈTRES & DROITS (MOD contrôle les accès)
 // ============================================================
+const PPERM_KEYS = [{ k: 'attachements', l: 'Saisie attachements' }, { k: 'documentation', l: 'Documentation' }, { k: 'permanence', l: 'Permanence' }, { k: 'meteo', l: 'Météo' }, { k: 'hqse', l: 'HQSE' }];
+const PPERM_ROLES = ['Architecte', 'BET', 'BCT', 'Laboratoire', 'Topographe', 'Entreprise'];
+function renderProjectPerms() {
+    const sel = document.getElementById('pperm-projet'); const cont = document.getElementById('pperm-matrix'); if (!sel || !cont) return;
+    const pid = parseInt(sel.value);
+    const pp = (window.appSettings && window.appSettings.projectPerms && window.appSettings.projectPerms[pid]) || {};
+    const cell = (role, k) => { const v = pp[role] && pp[role][k]; const val = v === true ? 'true' : (v === false ? 'false' : ''); return `<select class="form-control pperm" data-role="${role}" data-key="${k}" style="padding:4px;font-size:12px;"><option value="" ${val === '' ? 'selected' : ''}>Hérite</option><option value="true" ${val === 'true' ? 'selected' : ''}>Autorisé</option><option value="false" ${val === 'false' ? 'selected' : ''}>Interdit</option></select>`; };
+    cont.innerHTML = `<table class="data-table"><thead><tr><th>Rôle</th>${PPERM_KEYS.map(x => `<th>${x.l}</th>`).join('')}</tr></thead><tbody>${PPERM_ROLES.map(r => `<tr><td class="font-medium">${r}</td>${PPERM_KEYS.map(x => `<td>${cell(r, x.k)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+}
 const EMAIL_TMPL_EVENTS = [
     { key: 'decompteCreate', label: 'Nouveau décompte (→ BET)', vars: '{numero}', defSub: 'ANEP MOD — Nouveau décompte à viser', defBody: 'Un nouveau décompte « {numero} » attend votre validation technique (BET).' },
     { key: 'decompteStep', label: 'Étape de circuit (→ prochain responsable)', vars: '{numero} {role}', defSub: 'ANEP MOD — Décompte à traiter', defBody: 'Le décompte « {numero} » attend votre intervention ({role}).' },
@@ -5226,6 +5298,7 @@ async function renderParametres(container) {
     const modules = [{ id: 'documentation', label: 'Documentation & PV' }, { id: 'permanence', label: 'Permanence' }, { id: 'meteo', label: 'Météo' }, { id: 'hqse', label: 'HQSE' }];
     const em = s.email || {};
     const tmpl = s.emailTemplates || {};
+    const projets = await window.api.projets.getAll();
     const perm = (r, m) => !(s.perms && s.perms[r] && s.perms[r][m] === false); // défaut autorisé
     const attachAllowed = (r) => !!(s.perms && s.perms[r] && s.perms[r].attachements);
 
@@ -5297,8 +5370,18 @@ async function renderParametres(container) {
                 <p class="text-xs text-muted mt-sm">Laissez tel quel pour conserver les modèles par défaut. Cliquez « Enregistrer » en haut pour appliquer.</p>
             </div>
         </div>
+
+        <div class="card mt-lg animate-fade-in-up delay-4">
+            <div class="card-header"><h4><i data-lucide="shield" style="width:18px;height:18px;margin-right:8px;"></i>Droits par projet (surcharge)</h4></div>
+            <div class="card-body">
+                <p class="text-xs text-muted mb-md">Réglez des droits spécifiques à un projet ; « <strong>Hérite</strong> » applique le droit global défini plus haut. <strong>Enregistrez avant de changer de projet.</strong></p>
+                ${projets.length ? `<div class="filter-bar mb-md"><select class="form-control" id="pperm-projet" onchange="renderProjectPerms()">${projets.map(p => `<option value="${p.id}">${p.code_projet} — ${p.intitule}</option>`).join('')}</select></div>
+                <div id="pperm-matrix" class="table-wrapper"></div>` : '<p class="text-muted text-sm">Aucun projet.</p>'}
+            </div>
+        </div>
     `;
     if (window.lucide) lucide.createIcons({ node: container });
+    renderProjectPerms();
 }
 
 async function saveParametres() {
@@ -5323,6 +5406,14 @@ async function saveParametres() {
     cfg.emailTemplates = {};
     document.querySelectorAll('.tmpl-sub').forEach(i => { cfg.emailTemplates[i.dataset.key] = { subject: i.value, body: '' }; });
     document.querySelectorAll('.tmpl-body').forEach(i => { if (cfg.emailTemplates[i.dataset.key]) cfg.emailTemplates[i.dataset.key].body = i.value; });
+    // Droits par projet (préserve les autres projets, met à jour le projet affiché)
+    cfg.projectPerms = (window.appSettings && window.appSettings.projectPerms) ? JSON.parse(JSON.stringify(window.appSettings.projectPerms)) : {};
+    const ppSel = document.getElementById('pperm-projet');
+    if (ppSel && ppSel.value) {
+        const pid = parseInt(ppSel.value); const proj = {};
+        document.querySelectorAll('.pperm').forEach(sl => { if (sl.value === '') return; const r = sl.dataset.role, k = sl.dataset.key; if (!proj[r]) proj[r] = {}; proj[r][k] = (sl.value === 'true'); });
+        if (Object.keys(proj).length) cfg.projectPerms[pid] = proj; else delete cfg.projectPerms[pid];
+    }
     await window.api.settings.set(cfg);
     window.appSettings = cfg;
     buildNavigation(currentUser.role);

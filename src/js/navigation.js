@@ -97,16 +97,26 @@ Object.keys(ROLE_TASKS).forEach(role => {
 // Modules optionnels dont l'accès intervenant est réglable par le MOD
 const OPTIONAL_MODULES = ['documentation', 'permanence', 'meteo', 'hqse'];
 
+// Droit effectif : surcharge au niveau projet (currentUser.projet_id) → global → non défini (null)
+function effectivePerm(role, key) {
+    const s = window.appSettings || {};
+    const pid = (typeof currentUser !== 'undefined' && currentUser) ? currentUser.projet_id : null;
+    if (pid && s.projectPerms && s.projectPerms[pid] && s.projectPerms[pid][role] && s.projectPerms[pid][role][key] != null) {
+        return s.projectPerms[pid][role][key];
+    }
+    if (s.perms && s.perms[role] && s.perms[role][key] != null) return s.perms[role][key];
+    return null;
+}
+
 function isNavItemAllowed(role, itemId) {
     const s = window.appSettings || { modules: {}, perms: {} };
     if (itemId === 'paiements') {
         if (!s.modules || !s.modules.paiements) return false;
         if (role === 'MOD') return true;
-        return !!(s.perms && s.perms[role] && s.perms[role].attachements);
+        return effectivePerm(role, 'attachements') === true;
     }
     if (OPTIONAL_MODULES.includes(itemId) && role !== 'MOD') {
-        if (s.perms && s.perms[role] && s.perms[role][itemId] === false) return false;
-        return true;
+        return effectivePerm(role, itemId) !== false; // défaut autorisé sauf interdit explicite
     }
     return true;
 }
