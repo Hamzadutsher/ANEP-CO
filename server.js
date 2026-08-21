@@ -99,6 +99,14 @@ async function autoEmail(to, subject, text) {
     } catch (e) { /* silencieux : la notification in-app reste */ }
 }
 
+// Résout un modèle d'e-mail configuré (avec variables {clé}), sinon le modèle par défaut
+function emailTemplate(key, vars, defSubject, defBody) {
+    let subject = defSubject, body = defBody;
+    try { const t = ((db.getConfig() || {}).emailTemplates || {})[key]; if (t) { if (t.subject) subject = t.subject; if (t.body) body = t.body; } } catch (e) {}
+    const sub = (s) => String(s || '').replace(/\{(\w+)\}/g, (m, k) => (vars && vars[k] != null ? vars[k] : m));
+    return { subject: sub(subject), text: sub(body) };
+}
+
 // ============================================================
 // Pont RPC : channel -> handler (réutilise db.js)
 // ============================================================
@@ -154,7 +162,7 @@ const H = {
     'avis:getByIntervenant': a => db.getAvisByIntervenant(a[0]),
     'reserves:getByOuvrage': a => db.getReservesByOuvrage(a[0]),
     'reserves:getOuvertes': a => db.getReservesOuvertes(a[0]),
-    'reserves:create': async a => { const res = db.createReserve(a[0]); const em = a[0] && a[0].projet_id ? db.getRoleEmail(a[0].projet_id, 'Entreprise') : null; autoEmail(em, 'ANEP MOD — Réserve émise', `Une réserve a été émise${a[0] && a[0].description ? ' : ' + a[0].description : ''}. Merci de la traiter dans les meilleurs délais.`); return res; },
+    'reserves:create': async a => { const res = db.createReserve(a[0]); const em = a[0] && a[0].projet_id ? db.getRoleEmail(a[0].projet_id, 'Entreprise') : null; const t = emailTemplate('reserve', { description: (a[0] && a[0].description) || '' }, 'ANEP MOD — Réserve émise', 'Une réserve a été émise : {description}. Merci de la traiter dans les meilleurs délais.'); autoEmail(em, t.subject, t.text); return res; },
     'reserves:lever': a => db.leverReserve(a[0], a[1]),
     'reserves:delete': a => db.deleteReserve(a[0]),
     'os:getByLot': a => db.getOSByLot(a[0]),
@@ -216,7 +224,7 @@ const H = {
     'reunions:create': a => db.createReunion(a[0]),
     'reunions:update': a => db.updateReunion(a[0], a[1]),
     'reunions:delete': a => db.deleteReunion(a[0]),
-    'invitations:create': async a => { const res = db.createInvitation(a[0]); if (a[0] && a[0].email) autoEmail(a[0].email, 'ANEP MOD — Convocation à une réunion', `Bonjour${a[0].nom ? ' ' + a[0].nom : ''},\n\nVous êtes convoqué(e) à une réunion de chantier. La lettre de convocation officielle et les détails sont disponibles dans l'application ANEP MOD.`); return res; },
+    'invitations:create': async a => { const res = db.createInvitation(a[0]); if (a[0] && a[0].email) { const t = emailTemplate('invitation', { nom: (a[0] && a[0].nom) || '' }, 'ANEP MOD — Convocation à une réunion', 'Bonjour {nom},\n\nVous êtes convoqué(e) à une réunion de chantier. La lettre de convocation officielle et les détails sont disponibles dans l\'application ANEP MOD.'); autoEmail(a[0].email, t.subject, t.text); } return res; },
     'invitations:getByReunion': a => db.getInvitationsByReunion(a[0]),
     'notifications:get': a => db.getNotifications(a[0], a[1]),
     'notifications:markRead': a => db.markNotificationRead(a[0]),
@@ -304,7 +312,7 @@ const H = {
     'decomptes:getByProjet': a => db.getDecomptesByProjet(a[0]),
     'decomptes:get': a => db.getDecompte(a[0]),
     'decomptes:getCircuit': a => db.getDecompteCircuit(a[0]),
-    'decomptes:create': async a => { const res = db.createDecompte(a[0]); autoEmail(db.getRoleEmail(a[0].projet_id, 'BET'), 'ANEP MOD — Nouveau décompte à viser', `Un nouveau décompte « ${a[0].numero || ''} » attend votre validation technique (BET).`); return res; },
+    'decomptes:create': async a => { const res = db.createDecompte(a[0]); const t = emailTemplate('decompteCreate', { numero: a[0].numero || '' }, 'ANEP MOD — Nouveau décompte à viser', 'Un nouveau décompte « {numero} » attend votre validation technique (BET).'); autoEmail(db.getRoleEmail(a[0].projet_id, 'BET'), t.subject, t.text); return res; },
     'decomptes:actStep': async a => {
         const res = db.actOnDecompteStep(a[0], a[1], a[2], a[3]);
         try {
@@ -314,7 +322,8 @@ const H = {
                     const d = db.getDecompte(step.decompte_id);
                     const next = db.get("SELECT responsable_type FROM decompte_circuit WHERE decompte_id = ? AND statut = 'En attente' ORDER BY ordre LIMIT 1", [step.decompte_id]);
                     if (d && next && next.responsable_type && !['MOD', 'TGR'].includes(next.responsable_type)) {
-                        autoEmail(db.getRoleEmail(d.projet_id, next.responsable_type), 'ANEP MOD — Décompte à traiter', `Le décompte « ${d.numero} » attend votre intervention (${next.responsable_type}).`);
+                        const t = emailTemplate('decompteStep', { numero: d.numero, role: next.responsable_type }, 'ANEP MOD — Décompte à traiter', 'Le décompte « {numero} » attend votre intervention ({role}).');
+                        autoEmail(db.getRoleEmail(d.projet_id, next.responsable_type), t.subject, t.text);
                     }
                 }
             }

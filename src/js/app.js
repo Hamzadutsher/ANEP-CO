@@ -5212,6 +5212,12 @@ function showPhotoLightbox(index) {
 // ============================================================
 // PARAMÈTRES & DROITS (MOD contrôle les accès)
 // ============================================================
+const EMAIL_TMPL_EVENTS = [
+    { key: 'decompteCreate', label: 'Nouveau décompte (→ BET)', vars: '{numero}', defSub: 'ANEP MOD — Nouveau décompte à viser', defBody: 'Un nouveau décompte « {numero} » attend votre validation technique (BET).' },
+    { key: 'decompteStep', label: 'Étape de circuit (→ prochain responsable)', vars: '{numero} {role}', defSub: 'ANEP MOD — Décompte à traiter', defBody: 'Le décompte « {numero} » attend votre intervention ({role}).' },
+    { key: 'reserve', label: 'Réserve émise (→ Entreprise)', vars: '{description}', defSub: 'ANEP MOD — Réserve émise', defBody: 'Une réserve a été émise : {description}. Merci de la traiter dans les meilleurs délais.' },
+    { key: 'invitation', label: 'Convocation réunion (→ invité)', vars: '{nom}', defSub: 'ANEP MOD — Convocation à une réunion', defBody: 'Bonjour {nom},\n\nVous êtes convoqué(e) à une réunion de chantier.' }
+];
 async function renderParametres(container) {
     updatePageTitle('Paramètres & Droits');
     const s = await window.api.settings.get();
@@ -5219,6 +5225,7 @@ async function renderParametres(container) {
     const roles = ['Architecte', 'BET', 'BCT', 'Laboratoire', 'Topographe', 'Entreprise'];
     const modules = [{ id: 'documentation', label: 'Documentation & PV' }, { id: 'permanence', label: 'Permanence' }, { id: 'meteo', label: 'Météo' }, { id: 'hqse', label: 'HQSE' }];
     const em = s.email || {};
+    const tmpl = s.emailTemplates || {};
     const perm = (r, m) => !(s.perms && s.perms[r] && s.perms[r][m] === false); // défaut autorisé
     const attachAllowed = (r) => !!(s.perms && s.perms[r] && s.perms[r].attachements);
 
@@ -5276,6 +5283,20 @@ async function renderParametres(container) {
                 <button class="btn btn-ghost btn-sm" onclick="testSmtp()"><i data-lucide="send"></i> Envoyer un e-mail de test</button>
             </div>
         </div>
+
+        <div class="card mt-lg animate-fade-in-up delay-4">
+            <div class="card-header"><h4><i data-lucide="mail-plus" style="width:18px;height:18px;margin-right:8px;"></i>Modèles d'e-mails</h4></div>
+            <div class="card-body">
+                <p class="text-xs text-muted mb-md">Personnalisez l'objet et le corps de chaque notification automatique. Les <strong>variables entre accolades</strong> sont remplacées à l'envoi.</p>
+                ${EMAIL_TMPL_EVENTS.map(ev => { const t = tmpl[ev.key] || {}; return `
+                    <div style="padding:10px 0;border-bottom:1px solid var(--border-color);">
+                        <div class="d-flex justify-between align-center flex-wrap gap-sm mb-sm"><strong class="text-sm">${ev.label}</strong><span class="text-xs text-muted">variables : ${ev.vars}</span></div>
+                        <input type="text" class="form-control tmpl-sub mb-sm" data-key="${ev.key}" value="${(t.subject || ev.defSub).replace(/"/g, '&quot;')}" placeholder="Objet de l'e-mail">
+                        <textarea class="form-control tmpl-body" data-key="${ev.key}" rows="2" placeholder="Corps du message">${t.body || ev.defBody}</textarea>
+                    </div>`; }).join('')}
+                <p class="text-xs text-muted mt-sm">Laissez tel quel pour conserver les modèles par défaut. Cliquez « Enregistrer » en haut pour appliquer.</p>
+            </div>
+        </div>
     `;
     if (window.lucide) lucide.createIcons({ node: container });
 }
@@ -5298,10 +5319,14 @@ async function saveParametres() {
             from: (document.getElementById('smtp-from') || {}).value || ''
         };
     }
+    // Modèles d'e-mails
+    cfg.emailTemplates = {};
+    document.querySelectorAll('.tmpl-sub').forEach(i => { cfg.emailTemplates[i.dataset.key] = { subject: i.value, body: '' }; });
+    document.querySelectorAll('.tmpl-body').forEach(i => { if (cfg.emailTemplates[i.dataset.key]) cfg.emailTemplates[i.dataset.key].body = i.value; });
     await window.api.settings.set(cfg);
     window.appSettings = cfg;
     buildNavigation(currentUser.role);
-    showToast('Enregistré', 'Droits, modules et e-mail mis à jour.', 'success');
+    showToast('Enregistré', 'Droits, modules, e-mail et modèles mis à jour.', 'success');
 }
 async function testSmtp() {
     const to = prompt('Adresse e-mail de test :', (document.getElementById('smtp-user') || {}).value || '');

@@ -1513,7 +1513,8 @@ class AppDatabase {
         if (!row || !row.valeur) return defaults;
         try {
             const cfg = JSON.parse(row.valeur);
-            return { modules: Object.assign({}, defaults.modules, cfg.modules || {}), perms: cfg.perms || {} };
+            // Préserver toutes les clés (email, emailTemplates…) + appliquer les défauts modules/perms
+            return Object.assign({}, cfg, { modules: Object.assign({}, defaults.modules, cfg.modules || {}), perms: cfg.perms || {} });
         } catch (e) { return defaults; }
     }
     setConfig(obj) {
